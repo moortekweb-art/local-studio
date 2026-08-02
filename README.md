@@ -100,6 +100,14 @@ Start the frontend in a second terminal, then open
 cd frontend && npm ci && npm run dev
 ```
 
+The agent runtime bundle has its own lockfile and dependency tree — without
+this step `npm run build` fails at the bundle step with "Missing browser
+runtime package: playwright-core":
+
+```bash
+cd services/agent-runtime && bun install
+```
+
 `npm ci` runs a postinstall patch against `@earendil-works/pi-ai`. If that step
 prints a warning, agent streaming may misrender. The setup wizard walks through
 choosing a models directory, installing an engine, downloading a model,
@@ -181,6 +189,34 @@ Manual availability requires `npm start` to remain active. An OS-native user
 service can start the compiled app after login and restart it after a crash, but
 it is intentionally not installed automatically. The host must still be on,
 awake, online, and connected to Tailscale.
+
+### Path-prefix deployments
+
+To serve the frontend behind a reverse-proxy path prefix (e.g. `/studio`),
+build with `NEXT_PUBLIC_BASE_PATH=/studio`. Next.js applies it to routing,
+`<Link>`, and `_next` assets via `basePath`, and the hand-written references
+(manifest/icon links, `sw.js` registration, the `/api/proxy` client base) read
+the same variable. When it is unset, the default root-mount deployment (the
+Tailscale Serve pattern above) is unchanged. The PWA manifest
+(`frontend/public/manifest.json`) is a static file whose `start_url`, `scope`,
+and icon paths cannot be made prefix-safe without a build step, so
+service-worker registration is automatically disabled when
+`NEXT_PUBLIC_BASE_PATH` is set, even if `LOCAL_STUDIO_ENABLE_SERVICE_WORKER`
+is true. Hand-written root-absolute `fetch("/api/...")` calls are rewritten
+onto the prefix by the boot-script fetch wrapper in `src/app/layout.tsx`;
+non-fetch references (anchors, `src/lib/api/client.ts`) read the variable
+directly.
+
+### Sidebar network links
+
+The sidebar footer can link out to sibling services on your network. Set
+`NEXT_PUBLIC_PORTAL_URL` (a single portal URL) and/or
+`NEXT_PUBLIC_SIBLING_LINKS` (a JSON array of `{"label", "href"}` entries) at
+build time; when neither is set, nothing renders. Keep private hostnames in
+deployment environment files — never commit them to this public repository.
+Put the values in `frontend/.env.local` (gitignored, documented in
+`.env.example`); `scripts/deploy-remote.sh` ships that file to the remote so
+the remote build inlines them.
 
 ## Remote / LAN deployment
 

@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
 import path from "path";
 
 const nextConfig: NextConfig = {
+  // Optional reverse-proxy path prefix (e.g. "/studio"). When set, Next
+  // prefixes routing, <Link>, and _next assets itself; hand-written absolute
+  // references (layout.tsx, src/lib/api/client.ts) read the same var. Unset
+  // (the default root-mount / tailscale-serve deployment) leaves behavior
+  // unchanged.
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
   // Workaround for Next.js 16 bug: when unset, config.generateBuildId becomes
   // undefined, but generateBuildId() calls it as a function without a guard.
   generateBuildId: () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
@@ -120,16 +126,11 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/models",
-        destination: "/configure#models",
+        // ConfigurePage selects its section from the ?section query param (the
+        // hash alone falls back to "overview"), so both must be present — same
+        // as the legacy /recipes and /discover redirect stubs.
+        destination: "/configure?section=models#models",
         permanent: true,
-      },
-    ];
-  },
-  async rewrites() {
-    return [
-      {
-        source: "/api/chat-v2",
-        destination: "/api/chat",
       },
     ];
   },
