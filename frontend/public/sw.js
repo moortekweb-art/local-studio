@@ -1,8 +1,11 @@
-const CACHE_NAME = 'local-studio-v9';
+const CACHE_NAME = 'local-studio-v11';
+// Precache real routes only. /recipes is a 308 redirect stub to /configure —
+// precaching a redirected response breaks offline navigation replay in
+// Chromium (redirect-mode mismatch), so the destination is listed instead.
 const STATIC_ASSETS = [
   '/',
-  '/chat',
-  '/recipes',
+  '/agent',
+  '/configure',
   '/logs',
   '/manifest.json',
 ];

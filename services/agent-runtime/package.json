@@ -11,7 +11,7 @@
   "scripts": {
     "bundle": "node scripts/bundle.mjs",
     "build": "tsc -p tsconfig.build.json && node scripts/postbuild.mjs",
-    "dev": "bun --watch src/server.ts",
+    "dev": "PORT=${AGENT_RUNTIME_PORT:-8081} bun --watch src/server.ts",
     "start": "node dist/server.js",
     "test": "bun test"
   },

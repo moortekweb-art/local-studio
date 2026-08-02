@@ -41,15 +41,15 @@
     {
       "name": "Chat",
       "short_name": "Chat",
-      "description": "Open the chat interface",
-      "url": "/chat",
+      "description": "Open the agent workbench",
+      "url": "/agent",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Recipes",
-      "short_name": "Recipes",
-      "description": "Manage model recipes",
-      "url": "/recipes",
+      "name": "Models",
+      "short_name": "Models",
+      "description": "Manage models and recipes",
+      "url": "/configure?section=models",
       "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
     }
   ]
