@@ -2,6 +2,7 @@
 
 import { Settings, SquarePen, X } from "@/ui/icon-registry";
 import type { ProjectsNavSectionComponent } from "@/features/shell/left-sidebar-lazy";
+import { NetworkLinks } from "@/features/shell/network-links";
 import {
   NavItemMobile,
   ProjectsNavPlaceholder,
@@ -72,6 +73,10 @@ export function MobileNavigationDrawer({
             onClick={onClose}
           />
           <div className="h-4" />
+          {/* Same env-driven sibling links as the desktop sidebar footer. The
+              desktop sidebar is hidden below `md`, so without this the links
+              would be unreachable on mobile and in the installed PWA. */}
+          <NetworkLinks className="mt-1" />
           {projectsNavReady ? (
             ProjectsNavSection ? (
               <ProjectsNavSection expanded />
