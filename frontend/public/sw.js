@@ -1,4 +1,4 @@
-const CACHE_NAME = 'local-studio-v11';
+const CACHE_NAME = 'local-studio-v12';
 // Precache real routes only. /recipes is a 308 redirect stub to /configure —
 // precaching a redirected response breaks offline navigation replay in
 // Chromium (redirect-mode mismatch), so the destination is listed instead.
@@ -10,12 +10,20 @@ const STATIC_ASSETS = [
   '/manifest.json',
 ];
 
-// Install event - cache static assets
+// Install event - cache static assets.
+// Deliberately not cache.addAll(): that rejects the whole install if any one
+// route is unavailable (a controller still booting, a route removed in a later
+// build), which leaves the app with no service worker at all. Each asset is
+// added independently and failures are tolerated.
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    })
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        STATIC_ASSETS.map((asset) =>
+          cache.add(new Request(asset, { cache: 'reload' })).catch(() => {})
+        )
+      )
+    )
   );
   self.skipWaiting();
 });
@@ -46,8 +54,11 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        // Clone and cache successful responses
-        if (response.status === 200) {
+        // Only same-origin, non-redirected 200s are worth storing. Caching a
+        // redirect response and replaying it for a navigation trips Chromium's
+        // redirect-mode check and surfaces as a broken page rather than a
+        // cached one; opaque cross-origin responses are useless here.
+        if (response.status === 200 && response.type === 'basic' && !response.redirected) {
           const responseClone = response.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseClone);
@@ -55,9 +66,18 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(() => {
-        // Fall back to cache
-        return caches.match(event.request);
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        if (cached) return cached;
+        // respondWith(undefined) surfaces as a network error, so a navigation
+        // to a page that was never cached would look like a broken app rather
+        // than an offline one. Fall back to the cached app shell, which can
+        // client-route onward, and to an explicit 503 only as a last resort.
+        if (event.request.mode === 'navigate') {
+          const shell = await caches.match('/');
+          if (shell) return shell;
+        }
+        return new Response('', { status: 503, statusText: 'Offline' });
       })
   );
 });
