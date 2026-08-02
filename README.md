@@ -209,14 +209,51 @@ directly.
 
 ### Sidebar network links
 
-The sidebar footer can link out to sibling services on your network. Set
-`NEXT_PUBLIC_PORTAL_URL` (a single portal URL) and/or
-`NEXT_PUBLIC_SIBLING_LINKS` (a JSON array of `{"label", "href"}` entries) at
-build time; when neither is set, nothing renders. Keep private hostnames in
-deployment environment files — never commit them to this public repository.
-Put the values in `frontend/.env.local` (gitignored, documented in
-`.env.example`); `scripts/deploy-remote.sh` ships that file to the remote so
-the remote build inlines them.
+The sidebar footer and the mobile navigation drawer can link out to sibling
+services on your network. Two build-time variables drive it, and when neither
+is set nothing renders — there is no fallback URL in the source.
+
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_PORTAL_URL` | A single absolute URL. Rendered first, labelled "Portal". |
+| `NEXT_PUBLIC_SIBLING_LINKS` | A **JSON array** of `{"label": string, "href": string}` objects, as one literal string. |
+
+`NEXT_PUBLIC_SIBLING_LINKS` is parsed with `JSON.parse`. The literal string
+must be a JSON array — not comma-separated pairs, not an object — for example:
+
+```
+[{"label":"Hub","href":"https://example.invalid/hub/"},{"label":"Metrics","href":"https://example.invalid/metrics/"}]
+```
+
+Only `label` and `href` are read; any other keys are ignored. An entry is
+dropped unless `label` is a non-empty string and `href` is an absolute
+`http://` or `https://` URL — `javascript:`, `data:` and relative paths are
+rejected. If the variable is absent, blank, not valid JSON, or not an array,
+the whole list degrades to empty and the app renders normally with no sibling
+links (see `frontend/src/features/shell/network-links.test.ts`).
+
+Both variables are inlined by `next build`, so they must be present in the
+build environment, not the runtime one. Either export them for the build:
+
+```bash
+cd frontend
+NEXT_PUBLIC_SIBLING_LINKS='[{"label":"Hub","href":"https://example.invalid/hub/"}]' \
+NEXT_PUBLIC_PORTAL_URL='https://example.invalid/portal.html' \
+  npm run build
+```
+
+…or, preferably, put them in `frontend/.env.local` (gitignored, documented in
+`.env.example`) on the machine that builds the frontend:
+
+```
+NEXT_PUBLIC_SIBLING_LINKS=[{"label":"Hub","href":"https://example.invalid/hub/"}]
+```
+
+Note the shell quoting difference: in a shell command the JSON must be wrapped
+in single quotes so the double quotes survive; in `.env.local` it is written
+unquoted on one line. Keep private hostnames in these deployment files — never
+commit them to this public repository. `scripts/deploy-remote.sh` ships
+`frontend/.env.local` to the remote so the remote build inlines them.
 
 ## Remote / LAN deployment
 
