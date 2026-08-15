@@ -57,8 +57,14 @@ services:
       - /model
       - --served-model-name
       - GLM-5.2-Vision
+      # network_mode is host and vLLM serves no authentication of its own, so
+      # this address is the only thing deciding who can reach the model. It
+      # defaults to loopback: reachable by a gateway on the same box, not by
+      # everything that can route to the host. Set VLLM_BIND_HOST=0.0.0.0 only
+      # if a consumer genuinely lives on another machine, and put something in
+      # front of it when you do.
       - --host
-      - 0.0.0.0
+      - ${VLLM_BIND_HOST:-127.0.0.1}
       - --port
       - "8000"
       - --trust-remote-code
