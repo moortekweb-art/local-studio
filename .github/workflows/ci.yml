@@ -135,3 +135,50 @@ jobs:
           path: local-studio-${{ github.sha }}-arm64.zip
           if-no-files-found: error
           retention-days: 7
+
+  # docs/workflow.md lists e2e as a required gate into dev. Only the suites that
+  # stand up their own fakes belong here — controller-agent and provider-hub run
+  # a real standalone build against fixture servers on loopback. The live-*,
+  # hydration and installed-release suites need Spark/DGX hardware or an
+  # installed app bundle, so they stay out of CI and run from a workstation.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install controller contract dependencies
+        working-directory: ./controller
+        run: bun install --frozen-lockfile
+      - name: Install shared contract dependencies
+        working-directory: ./shared
+        run: bun install --frozen-lockfile
+      - name: Install agent runtime dependencies
+        working-directory: ./services/agent-runtime
+        run: bun install --frozen-lockfile
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci --legacy-peer-deps
+      - name: Build standalone server
+        working-directory: ./frontend
+        run: npm run build
+      - name: Install Playwright browser
+        working-directory: ./frontend
+        run: npx playwright install --with-deps chromium
+      - name: Controller agent suite
+        working-directory: ./frontend
+        run: npx playwright test --config e2e/controller-agent.config.ts
+      - name: Provider hub suite
+        working-directory: ./frontend
+        run: npx playwright test --config e2e/provider-hub.config.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-results-${{ github.sha }}
+          path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
