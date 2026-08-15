@@ -31,7 +31,7 @@ branches and two PRs. If they are not independent, they are one PR.
 1. Cut a branch from `dev`. Never from `main`.
 2. Push, open a PR into `dev`. The PR body lists its tasks; the PR is the unit of work.
 3. CI runs. A review agent reads the diff and leaves comments.
-4. Comments are addressed. Checks are green. Merge (squash). Branch auto-deletes.
+4. Comments are addressed. Checks are green. Merge (rebase). Branch auto-deletes.
 5. Nightly, `dev` builds and installs **Local Studio Dev.app**.
 6. When `dev` is good, open a promotion PR `dev → main`. That runs the full gate:
    e2e, a signed DMG, and a launch test of the DMG itself.
@@ -67,8 +67,14 @@ Nothing merges without these. They are required status checks, not conventions.
 the mounted volume, and asserts `/api/desktop-health`. A DMG that does not launch
 must not be able to reach a release.
 
-Both branches: no direct pushes, no force pushes, squash merge only, branch deleted
-on merge, conversation resolution required.
+Both branches: no direct pushes, no force pushes, branch deleted on merge,
+conversation resolution required.
+
+**`dev` takes rebase merges, `main` takes squashes.** The micro-commit gate budgets
+500 changed lines per commit, and a squash collapses a PR into one commit the size of
+the whole branch — so squashing anything sizeable into `dev` busts the budget, while a
+rebase lands exactly the commits that already passed it. `main` is the opposite case:
+every commit there is a shipped version, so a promotion PR squashes to one.
 
 ## Review
 
@@ -76,6 +82,12 @@ Review is done by a model on the PR, leaving comments — that is the required
 signal. GitHub will not let you approve your own pull request, so
 **required approvals is 0** and the enforcement lives in the checks instead:
 the review job must run and must resolve its comments before merge.
+
+That job is `.github/workflows/review.yml`. It needs an `ANTHROPIC_API_KEY`
+repository secret. **Until that secret is set the job skips — and GitHub counts a
+skipped check as satisfied, so the review gate is not enforced.** A green check on a
+PR with no review comments means the credential is missing, not that the diff was
+read.
 
 ## Scheduled work
 
