@@ -108,10 +108,6 @@ runtime package: playwright-core":
 cd services/agent-runtime && bun install
 ```
 
-Run this **after** `npm ci`, never before. The frontend's postinstall replaces
-`services/node_modules` with a link to `frontend/node_modules`, silently
-discarding an install done earlier.
-
 `shared/` has its own manifest and needs its own install too, or the bundle
 step fails with `Could not resolve: "effect"` from
 `shared/agent/litter-bridge.ts`:
