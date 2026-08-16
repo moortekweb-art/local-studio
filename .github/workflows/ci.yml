@@ -136,11 +136,20 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # docs/workflow.md lists e2e as a required gate into dev. Only the suites that
-  # stand up their own fakes belong here — controller-agent and provider-hub run
-  # a real standalone build against fixture servers on loopback. The live-*,
-  # hydration and installed-release suites need Spark/DGX hardware or an
-  # installed app bundle, so they stay out of CI and run from a workstation.
+  # docs/workflow.md lists e2e as a required gate into dev. Only controller-agent
+  # runs here, because it is the one suite that stands up everything it needs: a
+  # fake controller and a standalone frontend, both on loopback.
+  #
+  # provider-hub is excluded despite its config calling itself hermetic. It
+  # starts fake-cloud and the frontend but no controller, so /configure's calls
+  # to /studio/rigs and /events fail and "Connected providers" never renders —
+  # it passes on a workstation only because a real controller happens to be
+  # listening on :8080. Making it genuinely hermetic means teaching
+  # fixtures/fake-controller.mjs those two endpoints; until someone does, it
+  # stays a workstation suite rather than a gate that lies.
+  #
+  # live-*, hydration and installed-release need Spark/DGX hardware or an
+  # installed app bundle, so they stay out too.
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -172,9 +181,6 @@ jobs:
       - name: Controller agent suite
         working-directory: ./frontend
         run: npx playwright test --config e2e/controller-agent.config.ts
-      - name: Provider hub suite
-        working-directory: ./frontend
-        run: npx playwright test --config e2e/provider-hub.config.ts
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
