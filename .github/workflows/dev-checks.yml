@@ -3,9 +3,17 @@ name: Dev checks
 # dev is the working branch: many small commits, continuously green.
 # This gate keeps commits micro — reviewable single-intent changes — so the
 # weekly dev -> main PR is a readable changelog instead of a code dump.
+#
+# It runs on the pull request as well as the push, so an over-budget commit is
+# caught before it lands instead of turning dev red afterwards. Squashing a
+# multi-commit PR collapses it into a single commit the size of the whole
+# branch, which busts the budget on any sizeable PR — that is why dev takes
+# rebase merges. See docs/workflow.md.
 
 on:
   push:
+    branches: [dev]
+  pull_request:
     branches: [dev]
 
 permissions:
@@ -23,15 +31,20 @@ jobs:
         env:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.after }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           MAX_LINES=500
           # Lockfiles and generated snapshots don't count against the budget.
-          EXCLUDES=':(exclude)**/bun.lock' 
+          EXCLUDES=':(exclude)**/bun.lock'
           EXCLUDES2=':(exclude)**/package-lock.json'
           EXCLUDES3=':(exclude)shared/model-recommendations.json'
 
-          if [[ "$BEFORE" =~ ^0+$ ]]; then
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            # Every commit the PR would land, measured individually.
+            RANGE="$BASE_SHA..$HEAD_SHA"
+          elif [[ "$BEFORE" =~ ^0+$ ]]; then
             RANGE="origin/main..$AFTER"
           else
             RANGE="$BEFORE..$AFTER"

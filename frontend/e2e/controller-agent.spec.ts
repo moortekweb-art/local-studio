@@ -7,7 +7,15 @@ test("Pi defaults to the active controller and reveals other models on request",
   const picker = page.getByRole("button", { name: /^Model:/ }).first();
   await expect(picker).toBeEnabled({ timeout: 60_000 });
   await expect(picker).toHaveAccessibleName(/controller-model/);
-  await expect(page.getByRole("button", { name: "Pi tools: read only" })).toBeVisible();
+  // This replaced an assertion for a "Pi tools: read only" button. No commit
+  // ever added that control to frontend/src — the string existed only here —
+  // so the assertion could never have passed. It went unnoticed because the
+  // e2e suite was a required check that no workflow actually ran. The intent
+  // was that a new session starts with the agent's tools restricted, so assert
+  // that against the control that does exist: browser tools default to off.
+  const browserTools = page.getByRole("button", { name: "Browser tools" });
+  await expect(browserTools).toBeVisible();
+  await expect(browserTools).toHaveAttribute("aria-pressed", "false");
   await picker.click();
   await page.getByRole("menuitem", { name: /^Model\b/ }).click();
   await expect(page.getByRole("menuitemradio", { name: "controller-model" })).toBeVisible();

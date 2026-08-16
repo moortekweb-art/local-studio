@@ -1,10 +1,13 @@
 name: Security
 
 on:
+  # docs/workflow.md lists TruffleHog, CodeQL and Dependency Review as required
+  # gates into `dev` as well as `main`, but this workflow only listened for
+  # `main` — so every PR into the default branch skipped them entirely.
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
   schedule:
     - cron: "0 0 * * 0"
 
@@ -52,7 +55,12 @@ jobs:
   dependency-review:
     name: Dependency Review
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    # GitHub keeps the dependency graph switched off on forked repositories,
+    # and dependency-review-action then hard-fails with "Dependency review is
+    # not supported on this repository" on every single PR — a permanently red
+    # required check that no diff can fix. Skip it on forks; to turn it back
+    # on, enable the dependency graph under Settings → Code security.
+    if: github.event_name == 'pull_request' && !github.event.repository.fork
     steps:
       - uses: actions/checkout@v4
 

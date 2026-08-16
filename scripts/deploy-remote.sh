@@ -151,6 +151,15 @@ sync_frontend() {
   rsync -az -e "ssh $SSH_OPTS" \
     "${existing_frontend_files[@]}" \
     "$REMOTE:$REMOTE_DIR/frontend/" 2>/dev/null
+  # Build-time env (sidebar network links: NEXT_PUBLIC_PORTAL_URL /
+  # NEXT_PUBLIC_SIBLING_LINKS). These are inlined at `next build` on the
+  # remote, so the env file must ship too. It is gitignored on purpose —
+  # private tailnet hostnames stay out of the repository — hence the explicit
+  # copy here instead of relying on the source sync.
+  if [[ -e frontend/.env.local ]]; then
+    rsync -az -e "ssh $SSH_OPTS" \
+      frontend/.env.local "$REMOTE:$REMOTE_DIR/frontend/.env.local" 2>/dev/null || true
+  fi
   ok "frontend/src → remote"
 }
 
@@ -291,7 +300,6 @@ for controller_service in local-studio-controller-8080.service vllm-studio-contr
     exit 0
   fi
 done
-docker compose stop controller 2>/dev/null || true
 controller_dir=$(readlink -f "$PWD/controller")
 
 collect_controller_pids() {
@@ -383,7 +391,6 @@ restart_managed_frontend() {
 
 restart_detached_frontend() {
   cd "$remote_dir/frontend"
-  docker compose -f "$remote_dir/docker-compose.yml" stop frontend 2>/dev/null || true
   pkill -f "next start" 2>/dev/null || true
   pkill -f "next dev" 2>/dev/null || true
   fuser -k 3000/tcp >/dev/null 2>&1 || true
@@ -403,7 +410,6 @@ REMOTE
 
 start_infra() {
   step "Starting Docker infra"
-  remote "cd $REMOTE_DIR_SHELL && docker compose stop litellm 2>/dev/null || true"
   remote "cd $REMOTE_DIR_SHELL && docker compose up -d postgres 2>&1 | tail -5"
   ok "postgres :5432"
 }
