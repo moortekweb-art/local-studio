@@ -188,6 +188,13 @@ export function resolveAgentPolicyExtensionPath(): string | null {
   );
 }
 
+export function resolveScopedHarnessMemoryExtensionPath(): string | null {
+  return resolveBundledPiExtensionPath(
+    "scoped-harness-memory.ts",
+    process.env.LOCAL_STUDIO_SCOPED_MEMORY_EXTENSION_PATH,
+  );
+}
+
 // Locate a bundled skill directory (contains SKILL.md). Searched only when the
 // matching tool surface is ON so it can be appended to the SDK skill list and
 // teach the model how/when to use those tools.
@@ -275,12 +282,14 @@ function browserSkillPathFor(backend: "embedded" | "sitegeist"): string | null {
 function runtimeExtensionPaths(options: RuntimeStartOptions): string[] {
   const timeoutExtensionPath = resolveTimeoutExtensionPath();
   const agentPolicyExtensionPath = resolveAgentPolicyExtensionPath();
+  const scopedHarnessMemoryExtensionPath = resolveScopedHarnessMemoryExtensionPath();
   const browserExtensionPath = shouldLoadBrowserTool(options)
     ? browserExtensionPathFor(browserBackend(options))
     : null;
   return uniqueExistingPaths([
     timeoutExtensionPath,
     agentPolicyExtensionPath,
+    scopedHarnessMemoryExtensionPath,
     resolvePlanExtensionPath(),
     browserExtensionPath,
     hasEnabledConnectorsSync() ? resolveConnectorsExtensionPath() : null,

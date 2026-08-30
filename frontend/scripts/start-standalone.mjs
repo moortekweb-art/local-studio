@@ -9,6 +9,7 @@ const nestedRoot = resolve(standaloneRoot, "frontend");
 const serverRoot = existsSync(nestedRoot) ? nestedRoot : standaloneRoot;
 const rawPort = process.env.PORT || "4783";
 const port = Number(rawPort);
+const shutdownGraceMs = 5_000;
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
   throw new Error("PORT must be an integer from 1024 through 65535");
 }
@@ -80,6 +81,7 @@ const server = spawn(process.execPath, ["server.js"], {
   env: {
     ...process.env,
     HOSTNAME: process.env.HOSTNAME || "127.0.0.1",
+    NEXT_MANUAL_SIG_HANDLE: "1",
     PORT: String(port),
     LOCAL_STUDIO_AGENT_CWD: process.env.LOCAL_STUDIO_AGENT_CWD || resolve(projectRoot, ".."),
     LOCAL_STUDIO_AGENT_RUNTIME_URL: runtimeUrl,
@@ -87,19 +89,51 @@ const server = spawn(process.execPath, ["server.js"], {
 });
 console.log(`Local Studio: http://127.0.0.1:${port}`);
 
-function stopOwnedRuntime() {
-  if (agentRuntime?.exitCode === null) agentRuntime.kill("SIGTERM");
+function signalChild(child, signal) {
+  if (child && child.exitCode === null && child.signalCode === null) child.kill(signal);
 }
 
 let runtimeExitCode = 0;
+let serverExited = false;
+let runtimeExited = agentRuntime === null;
+let shuttingDown = false;
+let shutdownTimer;
+
+function finishShutdown() {
+  if (!shuttingDown || !serverExited || !runtimeExited) return;
+  clearTimeout(shutdownTimer);
+  process.exit(0);
+}
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  signalChild(agentRuntime, signal);
+  signalChild(server, signal);
+  shutdownTimer = setTimeout(() => {
+    signalChild(agentRuntime, "SIGKILL");
+    signalChild(server, "SIGKILL");
+    process.exit(0);
+  }, shutdownGraceMs);
+}
 
 server.on("exit", (code) => {
-  stopOwnedRuntime();
+  serverExited = true;
+  if (shuttingDown) {
+    finishShutdown();
+    return;
+  }
+  signalChild(agentRuntime, "SIGTERM");
   process.exit(runtimeExitCode || code || 0);
 });
 agentRuntime?.on("exit", (code) => {
+  runtimeExited = true;
+  if (shuttingDown) {
+    finishShutdown();
+    return;
+  }
   runtimeExitCode = code || 1;
-  if (server.exitCode === null) server.kill("SIGTERM");
+  signalChild(server, "SIGTERM");
 });
-process.on("SIGINT", () => server.kill("SIGINT"));
-process.on("SIGTERM", () => server.kill("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
+process.once("SIGTERM", () => shutdown("SIGTERM"));
