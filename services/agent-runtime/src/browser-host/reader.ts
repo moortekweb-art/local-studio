@@ -175,13 +175,12 @@ function markdownTitle(markdown: string, fallback: string): string {
 }
 
 function cleanMarkdown(markdown: string): string {
-  return markdown
+  return replaceUntilStable(replaceUntilStable(markdown, /<!--[\s\S]*?-->/g, ""), /<!--[\s\S]*$/g, "")
     .replace(/<img\b[^>]*\balt=["']([^"']*)["'][^>]*>/gi, (_match, alt: string) =>
       alt.trim() ? alt.trim() : "",
     )
     .replace(/<\/?(p|div|span|center|picture|source)\b[^>]*>/gi, "")
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<!--[\s\S]*?-->/g, "")
     .trim();
 }
 

@@ -128,7 +128,12 @@ function ensureInside(rootCwd: string, target: string): string {
 
 export function listDirectory(rootCwd: string, relPath: string): FsEntry[] {
   const root = resolveWorkspaceRoot(rootCwd);
-  const target = ensureInside(root, path.resolve(root, relPath || "."));
+  const resolved = path.resolve(root, relPath || ".");
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Path escapes project root");
+  }
+  const target = ensureInside(root, resolved);
   if (!existsSync(target)) throw new Error("Not found");
   const stats = statSync(target);
   if (!stats.isDirectory()) throw new Error("Not a directory");
@@ -231,7 +236,12 @@ export async function readFileSnippet(
   maxBytes = 5 * 1024 * 1024,
 ): Promise<{ content: string; truncated: boolean; size: number }> {
   const root = resolveWorkspaceRoot(rootCwd);
-  const target = ensureInside(root, path.resolve(root, relPath));
+  const resolved = path.resolve(root, relPath);
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Path escapes project root");
+  }
+  const target = ensureInside(root, resolved);
   const stats = await fs.stat(target);
   if (!stats.isFile()) throw new Error("Not a file");
   if (stats.size > maxBytes) {
@@ -279,7 +289,12 @@ export async function writeFileContent(
   content: string,
 ): Promise<void> {
   const root = resolveWorkspaceRoot(rootCwd);
-  const target = ensureInside(root, path.resolve(root, relPath));
+  const resolved = path.resolve(root, relPath);
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Path escapes project root");
+  }
+  const target = ensureInside(root, resolved);
   const stats = await fs.stat(target);
   if (!stats.isFile()) throw new Error("Not a file");
   await fs.writeFile(target, content, "utf8");
