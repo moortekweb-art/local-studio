@@ -3,8 +3,13 @@ import type { StudioStarterPreset } from "./types";
 /**
  * First-run presets shown when a controller has no recipes yet. Three lanes:
  * a serious local model, a small fast local model, and a remote endpoint —
- * so every machine (and no machine at all) has a working first chat.
+ * so every machine (and no machine at all) has a working first chat. The
+ * remote lane only appears when LOCAL_STUDIO_REMOTE_PRESET_URL is set: a
+ * hardcoded endpoint would be dead on every other install (and must never
+ * leak a private hostname into this public repo).
  */
+const remotePresetBaseUrl = process.env["LOCAL_STUDIO_REMOTE_PRESET_URL"];
+
 export const STUDIO_STARTER_PRESETS: StudioStarterPreset[] = [
   {
     id: "qwen3-6-35b",
@@ -44,18 +49,22 @@ export const STUDIO_STARTER_PRESETS: StudioStarterPreset[] = [
       enable_auto_tool_choice: true,
     },
   },
-  {
-    id: "deepseek-v4-flash",
-    name: "DeepSeek V4 Flash",
-    description:
-      "Connect a hosted endpoint with one API key — full-strength chat with nothing to download.",
-    kind: "remote",
-    tags: ["remote", "instant"],
-    size_gb: null,
-    min_vram_gb: null,
-    remote: {
-      base_url: "https://api.deepseek.com",
-      model: "deepseek-v4-flash",
-    },
-  },
+  ...(remotePresetBaseUrl
+    ? [
+        {
+          id: "deepseek-v4-flash",
+          name: "DeepSeek V4 Flash",
+          description:
+            "Connect a hosted endpoint with one API key — full-strength chat with nothing to download.",
+          kind: "remote" as const,
+          tags: ["remote", "instant"],
+          size_gb: null,
+          min_vram_gb: null,
+          remote: {
+            base_url: remotePresetBaseUrl,
+            model: "deepseek-v4-flash",
+          },
+        },
+      ]
+    : []),
 ];

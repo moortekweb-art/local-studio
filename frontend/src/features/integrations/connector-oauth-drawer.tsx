@@ -144,7 +144,11 @@ function GrantFacts({
       <ResourceFact
         label="Account"
         value={
-          connected ? <StatusText tone="ok">{status?.account ?? "connected"}</StatusText> : "none yet"
+          connected ? (
+            <StatusText tone="ok">{status?.account ?? "connected"}</StatusText>
+          ) : (
+            "none yet"
+          )
         }
       />
       <ResourceFact label="Scopes" value={scopes || "—"} mono />

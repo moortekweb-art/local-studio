@@ -242,9 +242,7 @@ export function ConnectorsSection() {
     // a row already exists: the row is an artifact of connecting, and the only
     // credential decision it holds — the grant — is managed there, never in
     // the env-field editor.
-    const oauthCatalog = CONNECTOR_CATALOG.find(
-      (entry) => entry.auth && entry.id === connector.id,
-    );
+    const oauthCatalog = CONNECTOR_CATALOG.find((entry) => entry.auth && entry.id === connector.id);
     if (oauthCatalog) {
       setOauthEntry(oauthCatalog);
       return;
@@ -413,7 +411,11 @@ export function ConnectorsSection() {
                           }
                         >
                           {entry.auth ? (
-                            installed ? "Open" : "Connect"
+                            installed ? (
+                              "Open"
+                            ) : (
+                              "Connect"
+                            )
                           ) : installed ? (
                             "Open"
                           ) : (

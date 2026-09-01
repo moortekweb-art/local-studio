@@ -86,9 +86,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     transport: "stdio",
     command: "node",
     args: [SSH_SERVER_PLACEHOLDER],
-    envFields: [
-      { key: "SSH_HOST", label: "SSH host", placeholder: "user@machine", secret: false },
-    ],
+    envFields: [{ key: "SSH_HOST", label: "SSH host", placeholder: "user@machine", secret: false }],
   },
 ];
 

@@ -86,8 +86,7 @@ export function StatusHardwareSection() {
     0,
   );
   const hottest = gpus.reduce(
-    (max, gpu) =>
-      gpu.temperature_available === false ? max : Math.max(max, gpu.temp_c ?? 0),
+    (max, gpu) => (gpu.temperature_available === false ? max : Math.max(max, gpu.temp_c ?? 0)),
     0,
   );
 
@@ -129,7 +128,11 @@ export function StatusHardwareSection() {
         />
       ) : null}
       {gpus.map((gpu, index) => (
-        <GpuBlock key={gpu.uuid || gpu.pci_bus_id || `${gpu.index}-${index}`} gpu={gpu} index={index} />
+        <GpuBlock
+          key={gpu.uuid || gpu.pci_bus_id || `${gpu.index}-${index}`}
+          gpu={gpu}
+          index={index}
+        />
       ))}
     </StatusGroup>
   );

@@ -48,7 +48,9 @@ export function StatusSubagentsSection({
       count={runs.length}
       right={
         running > 0 ? (
-          <span className="font-mono text-[length:var(--fs-xs)] text-(--ok)">{running} running</span>
+          <span className="font-mono text-[length:var(--fs-xs)] text-(--ok)">
+            {running} running
+          </span>
         ) : null
       }
     >

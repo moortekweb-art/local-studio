@@ -260,7 +260,9 @@ export function StepModel({
             variant="secondary"
             onClick={submitManualModel}
             disabled={resolvingManualModel}
-            icon={resolvingManualModel ? <Spinner size="xs" /> : <DownloadCloud className="h-4 w-4" />}
+            icon={
+              resolvingManualModel ? <Spinner size="xs" /> : <DownloadCloud className="h-4 w-4" />
+            }
           >
             {resolvingManualModel ? "Inspecting" : "Download"}
           </Button>

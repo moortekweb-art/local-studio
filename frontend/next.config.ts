@@ -2,6 +2,12 @@ import type { NextConfig } from "next";
 import path from "path";
 
 const nextConfig: NextConfig = {
+  // Optional reverse-proxy path prefix (e.g. "/studio"). When set, Next
+  // prefixes routing, <Link>, and _next assets itself; hand-written absolute
+  // references (layout.tsx, src/lib/api/client.ts) read the same var. Unset
+  // (the default root-mount / tailscale-serve deployment) leaves behavior
+  // unchanged.
+  basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
   // `npm run build` starts with `project.mjs prepare-next`, which rm -rf's the
   // whole output directory. Run that while a dev server is up — another agent
   // session, a packaging run — and dev's manifests vanish underneath it, so
@@ -118,6 +124,18 @@ const nextConfig: NextConfig = {
   // path for the out-of-root agent-runtime sources.
   turbopack: {
     root: path.join(__dirname, ".."),
+  },
+  async redirects() {
+    return [
+      {
+        source: "/models",
+        // ConfigurePage selects its section from the ?section query param (the
+        // hash alone falls back to "overview"), so both must be present — same
+        // as the legacy /recipes and /discover redirect stubs.
+        destination: "/configure?section=models#models",
+        permanent: true,
+      },
+    ];
   },
   async rewrites() {
     return [

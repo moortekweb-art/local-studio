@@ -75,10 +75,7 @@ function UiModalHeader({
 
   return (
     <div
-      className={cx(
-        "flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5",
-        className,
-      )}
+      className={cx("flex shrink-0 items-start justify-between gap-3 px-6 pb-3 pt-5", className)}
     >
       <div className="flex min-w-0 items-center gap-2">
         {icon}
@@ -130,10 +127,7 @@ interface UiModalFooterProps {
 function UiModalFooter({ children, leading, className }: UiModalFooterProps) {
   return (
     <div
-      className={cx(
-        "flex shrink-0 items-center justify-between gap-3 px-6 pb-5 pt-4",
-        className,
-      )}
+      className={cx("flex shrink-0 items-center justify-between gap-3 px-6 pb-5 pt-4", className)}
     >
       <div className="flex items-center gap-2">{leading}</div>
       <div className="flex items-center gap-2">{children}</div>

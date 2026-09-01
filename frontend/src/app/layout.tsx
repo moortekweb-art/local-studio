@@ -36,9 +36,22 @@ export const metadata: Metadata = {
   },
 };
 
+// Reverse-proxy path prefix (see next.config.ts basePath). Next prefixes its
+// own routing/assets; the hand-written references below must do it themselves.
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 const bootScript = `${getThemeBootstrapScript()}
   const originalFetch = window.fetch.bind(window);
+  const appBasePath = '${basePath}';
   window.fetch = (input, init = {}) => {
+    // Prefix-safety: hand-written fetch("/api/...") calls across the app are
+    // root-absolute; under a reverse-proxy path prefix (NEXT_PUBLIC_BASE_PATH)
+    // rewrite them onto the prefix in this one place. Calls that already carry
+    // the prefix (src/lib/api/client.ts) start with the prefix, not "/api/",
+    // so they are never double-prefixed.
+    if (appBasePath && typeof input === 'string' && input.startsWith('/api/')) {
+      input = appBasePath + input;
+    }
     const requestMethod = String(init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
     const requestUrl = new URL(input instanceof Request ? input.url : String(input), window.location.href);
     if (requestUrl.origin === window.location.origin && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(requestMethod)) {
@@ -50,11 +63,15 @@ const bootScript = `${getThemeBootstrapScript()}
     }
     return originalFetch(input, init);
   };
-  const enableServiceWorker = ${process.env.LOCAL_STUDIO_ENABLE_SERVICE_WORKER === "true" ? "true" : "false"};
+  // The service worker stays disabled on path-prefix deployments regardless of
+  // LOCAL_STUDIO_ENABLE_SERVICE_WORKER: sw.js precaches root-absolute routes
+  // and the static manifest's start_url/scope cannot be made prefix-safe (see
+  // README "Path-prefix deployments").
+  const enableServiceWorker = ${process.env.LOCAL_STUDIO_ENABLE_SERVICE_WORKER === "true" && !(process.env.NEXT_PUBLIC_BASE_PATH ?? "") ? "true" : "false"};
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       if (enableServiceWorker) {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
+        navigator.serviceWorker.register('${basePath}/sw.js').catch(() => {});
         return;
       }
       navigator.serviceWorker.getRegistrations()
@@ -83,9 +100,9 @@ export default function RootLayout({
   return (
     <html lang="en" data-theme="zai-dark" suppressHydrationWarning>
       <head>
-        <link rel="manifest" href="/manifest.json" crossOrigin="use-credentials" />
-        <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-        <link rel="icon" href="/mocks/logo-1.svg" type="image/svg+xml" />
+        <link rel="manifest" href={`${basePath}/manifest.json`} crossOrigin="use-credentials" />
+        <link rel="apple-touch-icon" href={`${basePath}/icons/apple-touch-icon.png`} />
+        <link rel="icon" href={`${basePath}/mocks/logo-1.svg`} type="image/svg+xml" />
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body>

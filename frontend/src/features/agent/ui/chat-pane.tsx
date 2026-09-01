@@ -172,25 +172,25 @@ function ChatTranscript({
   if (composerOnly) return null;
   return (
     <TranscriptSessionContext value={transcriptSession}>
-    <div className={terminalView ? "hidden" : "flex min-h-0 min-w-0 flex-1"}>
-      {showEmptyPrompt ? (
-        <EmptyPromptTimeline />
-      ) : (
-        <Timeline
-          key={activeTab?.id ?? "empty"}
-          stickToBottom={stickToBottom}
-          onStickToBottomChange={setStickToBottom}
-          messages={activeTab?.messages ?? []}
-          running={running}
-          cwd={cwd || null}
-          viewKey={viewKey}
-          viewAlias={viewAlias}
-          onForkSession={onForkSession}
-          hasEarlier={activeTab?.historyCursor != null}
-          onLoadEarlier={loadEarlierHistory}
-        />
-      )}
-    </div>
+      <div className={terminalView ? "hidden" : "flex min-h-0 min-w-0 flex-1"}>
+        {showEmptyPrompt ? (
+          <EmptyPromptTimeline />
+        ) : (
+          <Timeline
+            key={activeTab?.id ?? "empty"}
+            stickToBottom={stickToBottom}
+            onStickToBottomChange={setStickToBottom}
+            messages={activeTab?.messages ?? []}
+            running={running}
+            cwd={cwd || null}
+            viewKey={viewKey}
+            viewAlias={viewAlias}
+            onForkSession={onForkSession}
+            hasEarlier={activeTab?.historyCursor != null}
+            onLoadEarlier={loadEarlierHistory}
+          />
+        )}
+      </div>
     </TranscriptSessionContext>
   );
 }

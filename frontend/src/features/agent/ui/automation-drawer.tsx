@@ -11,7 +11,10 @@ import {
   type AutomationModel,
 } from "@/features/agent/automations/automation-api";
 import { AutomationEditor } from "@/features/agent/automations/automation-editor";
-import { NEW_AUTOMATION_DRAFT, type AutomationDraft } from "@/features/agent/automations/automation-model";
+import {
+  NEW_AUTOMATION_DRAFT,
+  type AutomationDraft,
+} from "@/features/agent/automations/automation-model";
 
 /** Turn a chat session into a scheduled automation without leaving the chat.
  *

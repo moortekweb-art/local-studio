@@ -55,9 +55,7 @@ function FormField({
         aria-describedby={describedBy}
         aria-invalid={error ? true : undefined}
       >
-        <legend className={FIELD_LABEL_CLASS}>
-          {fieldLabel}
-        </legend>
+        <legend className={FIELD_LABEL_CLASS}>{fieldLabel}</legend>
         {children}
         {messages}
       </fieldset>
@@ -69,10 +67,7 @@ function FormField({
       value={{ controlId, describedBy, required, invalid: Boolean(error) }}
     >
       <div className={className}>
-        <label
-          htmlFor={controlId}
-          className={FIELD_LABEL_CLASS}
-        >
+        <label htmlFor={controlId} className={FIELD_LABEL_CLASS}>
           {fieldLabel}
         </label>
         {children}

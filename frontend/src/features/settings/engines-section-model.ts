@@ -39,7 +39,5 @@ export function hasHydratedEngineRows(view: EngineRowsView): boolean {
 }
 
 function isInferenceTarget(target: RuntimeTarget): boolean {
-  return (
-    target.backend === "vllm" || target.backend === "sglang" || target.backend === "exllamav3"
-  );
+  return target.backend === "vllm" || target.backend === "sglang" || target.backend === "exllamav3";
 }

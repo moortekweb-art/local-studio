@@ -452,13 +452,7 @@ const STATUS_TONE_CLASS: Record<StatusTone, string> = {
  * it reads as decoration, and the colour alone already carries "fine / needs
  * attention / broken" at a glance.
  */
-export function StatusText({
-  children,
-  tone = "dim",
-}: {
-  children: ReactNode;
-  tone?: StatusTone;
-}) {
+export function StatusText({ children, tone = "dim" }: { children: ReactNode; tone?: StatusTone }) {
   return (
     <span className={cx("text-[length:var(--fs-xs)]", STATUS_TONE_CLASS[tone])}>{children}</span>
   );

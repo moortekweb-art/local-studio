@@ -23,7 +23,10 @@ export function ServerContent({ embedded = false }: { embedded?: boolean }) {
   const realtime = useRealtimeStatusStore();
   const [tab, setTab] = useState<Tab>("logs");
   const backendUrl = useMemo(
-    () => (getStoredBackendUrl() || "http://127.0.0.1:8080").replace(/\/+$/, ""),
+    // Must match the proxy's trusted default origin (shared/agent/backend-url.ts
+    // LOCAL_BACKEND_FALLBACK): "localhost" and "127.0.0.1" are different origins,
+    // and the proxy 403-blocks non-allowlisted overrides.
+    () => (getStoredBackendUrl() || "http://localhost:8080").replace(/\/+$/, ""),
     [],
   );
   const content = (
@@ -219,7 +222,7 @@ function RuntimeGroup({ realtime }: { realtime: RealtimeStatusSnapshot }) {
         label="GPU monitoring"
         value={
           summary
-            ? `${summary.gpu_monitoring.available ? "available" : "unavailable"} · ${summary.gpu_monitoring.tool}`
+            ? `${summary.gpu_monitoring.available ? "available" : "unavailable"}${summary.gpu_monitoring.tool ? ` · ${summary.gpu_monitoring.tool}` : ""}`
             : "—"
         }
       />
@@ -408,13 +411,18 @@ function DocsPanel() {
       <section className="flex h-full min-h-[32rem] flex-col overflow-hidden rounded-lg border border-(--color-card-border) bg-(--color-card)">
         <div className="flex min-h-10 items-center justify-between border-b border-(--color-card-border) px-3 text-xs">
           <span className="text-(--color-foreground-subtle)">OpenAPI reference</span>
+          {/* Links to the raw OpenAPI spec, not /api/docs: the controller's
+              swagger UI loads its assets from cdn.jsdelivr.net, which the
+              frontend CSP blocks (and which is unreachable on offline/tailnet
+              hosts), rendering a blank page. The in-app OpenApiPanel below is
+              the browsable reference. basePath keeps the href prefix-safe. */}
           <a
-            href="/api/proxy/api/docs"
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/proxy/api/spec`}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-(--color-foreground-subtle) hover:text-(--fg)"
           >
-            Open <ExternalLink className="h-3 w-3" />
+            Open spec <ExternalLink className="h-3 w-3" />
           </a>
         </div>
         <OpenApiPanel />

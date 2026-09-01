@@ -41,10 +41,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
   return (
     <div>
       {label && (
-        <label
-          htmlFor={inputId}
-          className={FIELD_LABEL_CLASS}
-        >
+        <label htmlFor={inputId} className={FIELD_LABEL_CLASS}>
           {label}
         </label>
       )}

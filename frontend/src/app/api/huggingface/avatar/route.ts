@@ -53,7 +53,11 @@ export async function GET(request: NextRequest) {
   }
 
   const avatarUrl = await resolveAvatarUrl(owner);
-  if (!avatarUrl) return NextResponse.json({ error: "Avatar not found." }, { status: 404 });
+  // 204, not 404: "no avatar" is the normal case on offline/tailnet-only hosts
+  // where huggingface.co is unreachable. A non-2xx here paints a red console
+  // error per model owner on every models-page render; an empty 204 still
+  // fails <img> decoding, so ModelLogo's onError letter-badge fallback fires.
+  if (!avatarUrl) return new NextResponse(null, { status: 204 });
 
   // Proxy the image bytes rather than 307-redirecting. In the Electron desktop
   // context, a cross-origin redirect to cdn-avatars.huggingface.co can be

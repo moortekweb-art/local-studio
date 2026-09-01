@@ -578,10 +578,7 @@ function mergeCanonicalAndRuntimeEvents(
   ]);
 }
 
-function reconcileReplayMessages(
-  current: ChatMessage[],
-  canonical: ChatMessage[],
-): ChatMessage[] {
+function reconcileReplayMessages(current: ChatMessage[], canonical: ChatMessage[]): ChatMessage[] {
   if (canonical.length === 0) return current;
   if (canonical.length >= current.length) return canonical;
   return current;

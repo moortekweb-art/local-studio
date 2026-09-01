@@ -125,10 +125,7 @@ export function loadComputerState(): ComputerState {
   const storedTab = read(COMPUTER_TAB_KEY);
   const tab: ComputerTab = isComputerTab(storedTab) ? storedTab : "status";
   const storedTabs = readComputerTabs();
-  const persistedTabs = uniqueComputerTabs([
-    "status",
-    ...(storedTabs.length ? storedTabs : [tab]),
-  ]);
+  const persistedTabs = uniqueComputerTabs(["status", ...(storedTabs.length ? storedTabs : [tab])]);
   const tabs = persistedTabs.includes(tab)
     ? persistedTabs
     : uniqueComputerTabs([...persistedTabs, tab]);

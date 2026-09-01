@@ -308,7 +308,11 @@ function compact(value: number | null): string | null {
   return value != null ? formatCompactTokens(value) : null;
 }
 
-function capDetail(shareValue: number | null, cap: number | null, unit: string): string | undefined {
+function capDetail(
+  shareValue: number | null,
+  cap: number | null,
+  unit: string,
+): string | undefined {
   if (shareValue === null || cap === null) return undefined;
   return `${Math.round(shareValue * 100)}% of ${cap.toFixed(0)} ${unit}`;
 }

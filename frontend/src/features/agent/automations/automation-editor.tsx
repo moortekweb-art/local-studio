@@ -403,13 +403,7 @@ function DeleteRow({
           >
             Delete this automation
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={busy}
-            onClick={onCancelDelete}
-          >
+          <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onCancelDelete}>
             Cancel
           </Button>
         </>

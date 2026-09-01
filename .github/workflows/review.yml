@@ -1,0 +1,62 @@
+name: Review
+
+# docs/workflow.md makes model review the required review signal on a PR:
+# required approvals is 0 because GitHub will not let you approve your own pull
+# request, and this job stands in its place.
+#
+# It needs an ANTHROPIC_API_KEY repository secret. Without one the job skips,
+# and GitHub counts a skipped check as satisfied — so the gate is inert until
+# that secret exists. That is deliberate: a missing credential should not wedge
+# every pull request in the repository. docs/workflow.md states the same thing,
+# so nobody reads a green check here as a review that happened.
+
+on:
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  model-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for review credentials
+        id: creds
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANTHROPIC_API_KEY is not set — the model review gate did not run on this pull request."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.creds.outputs.available == 'true'
+        with:
+          fetch-depth: 0
+
+      - name: Review the diff
+        if: steps.creds.outputs.available == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: "true"
+          prompt: |
+            Review this pull request as the required review signal described in
+            docs/workflow.md. Read that file first — it wins over anything else.
+
+            Leave inline comments only on things a maintainer would have to act
+            on: correctness defects, broken or dead links and routes, security
+            or privacy exposure, and violations of the repository's own rules
+            (conventional commits, the 500-line micro-commit budget, no private
+            hostnames or tailnet addresses in tracked files, no direct pushes).
+
+            Do not comment on style a linter already enforces, and do not
+            restate the diff. If you find nothing that needs action, say so in
+            one line rather than inventing findings.

@@ -446,8 +446,7 @@ function ApiStatus({
   if (loading) {
     return <StatusPill tone="info">loading</StatusPill>;
   }
-  const tone: UiTone =
-    status === "connected" ? "good" : status === "error" ? "danger" : "default";
+  const tone: UiTone = status === "connected" ? "good" : status === "error" ? "danger" : "default";
   const label = message || (status === "unknown" ? "not tested" : status);
   return (
     <span className="inline-flex items-center gap-1.5">

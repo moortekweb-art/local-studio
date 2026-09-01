@@ -119,7 +119,11 @@ function loadControllers(): SavedController[] {
   }
   if (activeUrl && !byUrl.has(activeUrl)) byUrl.set(activeUrl, { url: activeUrl });
   if (byUrl.size === 0) {
-    const primary = normalizeControllerUrl(getStoredBackendUrl() || "http://127.0.0.1:8080");
+    // Must match the proxy's trusted default origin (shared/agent/backend-url.ts
+    // LOCAL_BACKEND_FALLBACK): "localhost" and "127.0.0.1" are different origins,
+    // and the proxy 403-blocks non-allowlisted X-Backend-Url overrides — the
+    // 127.0.0.1 spelling made every fresh-install status poll fail with 403.
+    const primary = normalizeControllerUrl(getStoredBackendUrl() || "http://localhost:8080");
     if (primary) byUrl.set(primary, { url: primary });
   }
   return [...byUrl.values()];

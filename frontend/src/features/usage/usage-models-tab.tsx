@@ -21,7 +21,15 @@ import { UsageModelDrawer, modelIdentity, type UsageModel } from "./usage-model-
 import { useSortedRows } from "./usage-sort";
 
 type SortKey =
-  "model" | "requests" | "tokens" | "avg" | "prefill" | "decode" | "ttft" | "latency" | "success";
+  | "model"
+  | "requests"
+  | "tokens"
+  | "avg"
+  | "prefill"
+  | "decode"
+  | "ttft"
+  | "latency"
+  | "success";
 
 const sortValue = (row: UsageModel, key: SortKey): number | string | null => {
   switch (key) {

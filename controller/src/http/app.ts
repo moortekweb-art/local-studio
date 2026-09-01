@@ -101,7 +101,13 @@ export const createApp = (
         },
       }),
     ),
-    app.get("/api/docs", swaggerUI({ url: "/api/spec" })),
+    // Relative on purpose: resolves to /api/spec when the docs are opened
+    // directly, and to /api/proxy/api/spec if someone opens them through the
+    // frontend proxy. Note the swagger UI pulls its assets from
+    // cdn.jsdelivr.net, so it only renders on hosts with internet access —
+    // the frontend (features/logs/server-view.tsx) links to the raw spec and
+    // browses it in-app instead of linking here.
+    app.get("/api/docs", swaggerUI({ url: "spec" })),
   );
 
   documentedRoutes.notFound((ctx) => ctx.json({ detail: "Not Found" }, { status: 404 }));

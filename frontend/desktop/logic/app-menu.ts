@@ -52,7 +52,12 @@ export function installApplicationMenu(): void {
         { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: resetZoom },
         { label: "Zoom In", accelerator: "CmdOrCtrl+Plus", click: () => stepZoom(1) },
         // The stock menu binds both = and numpad +; keep the common one too.
-        { label: "Zoom In (=)", accelerator: "CmdOrCtrl+=", click: () => stepZoom(1), visible: false },
+        {
+          label: "Zoom In (=)",
+          accelerator: "CmdOrCtrl+=",
+          click: () => stepZoom(1),
+          visible: false,
+        },
         { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: () => stepZoom(-1) },
         { type: "separator" },
         { role: "togglefullscreen" },

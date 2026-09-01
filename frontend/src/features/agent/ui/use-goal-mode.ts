@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, type Dispatch, type FormEvent, type KeyboardEvent, type SetStateAction } from "react";
+import {
+  useCallback,
+  type Dispatch,
+  type FormEvent,
+  type KeyboardEvent,
+  type SetStateAction,
+} from "react";
 
 /** ChatGPT-style goal mode for the composer.
  *

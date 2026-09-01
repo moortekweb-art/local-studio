@@ -41,9 +41,7 @@ function ServePipelineRail({ recipe }: { recipe: RecipeEditor }) {
             >
               {index + 1}
             </span>
-            <span className="truncate text-[length:var(--fs-sm)] font-medium">
-              {label}
-            </span>
+            <span className="truncate text-[length:var(--fs-sm)] font-medium">{label}</span>
           </li>
         );
       })}

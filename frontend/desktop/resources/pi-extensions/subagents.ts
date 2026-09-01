@@ -192,10 +192,13 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
         }
         const partial = run.report ? `\n\nPartial work:\n${run.report}` : "";
         if (run.status === "cancelled") {
-          return textResult(`Subagent "${args.name ?? runId}" was stopped before it reported.${partial}`, {
-            runId,
-            status: "cancelled",
-          });
+          return textResult(
+            `Subagent "${args.name ?? runId}" was stopped before it reported.${partial}`,
+            {
+              runId,
+              status: "cancelled",
+            },
+          );
         }
         return failure(`Subagent failed: ${run.error ?? "unknown error"}${partial}`, {
           runId,

@@ -2,7 +2,15 @@
 
 import { useState, type ReactNode } from "react";
 import { Square, TriangleAlert } from "@/ui/icon-registry";
-import { Button, ErrorBox, UiModal, UiModalBody, UiModalFooter, UiModalHeader, Spinner } from "@/ui";
+import {
+  Button,
+  ErrorBox,
+  UiModal,
+  UiModalBody,
+  UiModalFooter,
+  UiModalHeader,
+  Spinner,
+} from "@/ui";
 
 type StopTriggerArgs = {
   open: () => void;

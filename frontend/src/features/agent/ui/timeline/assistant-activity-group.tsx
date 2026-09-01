@@ -154,7 +154,7 @@ export const AssistantActivityGroup = memo(function AssistantActivityGroup({
             collapsed summary grows with the turn ("Ran 20 commands · edited 13
             files · …") and will not fit a phone column — let it truncate
             instead of forcing the row wider than the thread. */}
-        {!(busy) ? <SummaryGlyph kind={summaryIcon} /> : null}
+        {!busy ? <SummaryGlyph kind={summaryIcon} /> : null}
         <span
           className={`text-[length:var(--fs-base)] font-normal leading-5 ${
             busy ? "codex-shimmer-text shrink-0" : "min-w-0 flex-1 truncate"
@@ -162,7 +162,7 @@ export const AssistantActivityGroup = memo(function AssistantActivityGroup({
         >
           {busy ? "Working" : summary}
         </span>
-        {!expanded && (busy) && preview ? (
+        {!expanded && busy && preview ? (
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-(--dim)/70">
             <PreviewGlyph kind={preview.kind} verb={preview.verb} />
             <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--codex-chat-code-font-size)] leading-5">

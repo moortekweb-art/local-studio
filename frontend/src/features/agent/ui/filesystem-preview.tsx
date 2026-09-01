@@ -160,11 +160,7 @@ export function RenderedPreview({
     return (
       <div
         className="min-h-0 flex-1 overflow-y-auto bg-(--bg) px-3 py-2 text-sm leading-6 text-(--fg)"
-        style={
-          fontSize
-            ? { fontSize, lineHeight: `${Math.round(fontSize * 1.6)}px` }
-            : undefined
-        }
+        style={fontSize ? { fontSize, lineHeight: `${Math.round(fontSize * 1.6)}px` } : undefined}
       >
         <MarkdownWithMermaid text={content} cwd={cwd} />
       </div>

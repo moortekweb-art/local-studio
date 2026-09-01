@@ -112,7 +112,10 @@ export function orderedVariants(model: ModelIndexModel): ModelIndexVariant[] {
  * The verdict shown on the card: the smallest variant that clears the budget
  * wins, so a model is "runnable" as soon as any one of its quantizations is.
  */
-export function bestFit(model: ModelIndexModel, poolGb: number): { fit: Fit; variant: ModelIndexVariant | null } {
+export function bestFit(
+  model: ModelIndexModel,
+  poolGb: number,
+): { fit: Fit; variant: ModelIndexVariant | null } {
   let best: { fit: Fit; variant: ModelIndexVariant | null } = {
     fit: fitFor(null, poolGb),
     variant: null,

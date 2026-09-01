@@ -84,7 +84,11 @@ export function PreviewScroll({
 
   return (
     <div
-      className={cx("min-w-0 overscroll-contain", locked ? "overflow-auto" : "overflow-hidden", className)}
+      className={cx(
+        "min-w-0 overscroll-contain",
+        locked ? "overflow-auto" : "overflow-hidden",
+        className,
+      )}
       style={locked ? { height: capPx } : undefined}
     >
       <div ref={observeContent} className="min-w-0">

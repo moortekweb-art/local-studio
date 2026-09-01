@@ -9,12 +9,12 @@ The `chrome_*` tools drive **the browser the user is looking at**: their window,
 
 This is the opposite trade from `browser_*` (the cua sandbox), and the two do not share state:
 
-| | `chrome_*` | `browser_*` |
-| --- | --- | --- |
-| Whose browser | the user's real one | a headless throwaway |
-| Signed in | yes, as them | no, as nobody |
-| Visible to the user | yes | only in the Browser panel |
-| Cost of a mistake | real and often public | a reload |
+|                     | `chrome_*`            | `browser_*`               |
+| ------------------- | --------------------- | ------------------------- |
+| Whose browser       | the user's real one   | a headless throwaway      |
+| Signed in           | yes, as them          | no, as nobody             |
+| Visible to the user | yes                   | only in the Browser panel |
+| Cost of a mistake   | real and often public | a reload                  |
 
 Pick by what the task needs, not by habit. Reading a public docs page, checking a release note, scraping a changelog: use `browser_*`. Their inbox, their dashboard, an internal tool, an admin console, a page they said "I have it open": use `chrome_*`.
 

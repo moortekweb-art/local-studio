@@ -257,9 +257,9 @@ function RuntimeTargetRow({
   const location = pathForTarget(target);
   const hasDetail = Boolean(
     job ||
-      (target.capabilities.canUpdate && target.update) ||
-      !target.capabilities.canUpdate ||
-      healthMessage,
+    (target.capabilities.canUpdate && target.update) ||
+    !target.capabilities.canUpdate ||
+    healthMessage,
   );
 
   return (

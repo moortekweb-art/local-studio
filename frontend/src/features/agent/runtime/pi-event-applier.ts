@@ -323,7 +323,9 @@ function reduceToolResultMessageEvent(
           id: toolCallId,
           name: (typeof msg.toolName === "string" && msg.toolName) || "tool",
           status: isError ? "error" : "done",
-          ...(asRecord(msg.details) ? { details: asRecord(msg.details) as Record<string, unknown> } : {}),
+          ...(asRecord(msg.details)
+            ? { details: asRecord(msg.details) as Record<string, unknown> }
+            : {}),
           text: resultText,
         }),
       ),

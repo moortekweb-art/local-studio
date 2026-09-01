@@ -49,9 +49,7 @@ export function RecipeModalSummary({
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="text-[length:var(--fs-sm)] text-(--ui-muted)">
-            Engine
-          </span>
+          <span className="text-[length:var(--fs-sm)] text-(--ui-muted)">Engine</span>
           <SegmentedControl
             items={BACKEND_ITEMS}
             value={backend}

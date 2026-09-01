@@ -152,9 +152,9 @@ function PluginEditorDrawer({
       width={860}
     >
       <Alert variant="warning" className="mb-6">
-        A plugin runs inside the agent process with your user account — the same reach as the
-        agent itself, with no sandbox between them. Saving writes the file and nothing more; the
-        code first runs when your next message rebuilds the session.
+        A plugin runs inside the agent process with your user account — the same reach as the agent
+        itself, with no sandbox between them. Saving writes the file and nothing more; the code
+        first runs when your next message rebuilds the session.
       </Alert>
 
       {creating ? (
@@ -178,8 +178,8 @@ function PluginEditorDrawer({
         <div className="mb-2">
           <h3 className="text-[length:var(--fs-base)] font-medium text-(--ui-fg)">Source</h3>
           <p className="mt-0.5 text-[length:var(--fs-sm)] text-(--ui-muted)">
-            TypeScript, compiled by the agent on load. Imports resolve against the agent&rsquo;s
-            own dependencies.
+            TypeScript, compiled by the agent on load. Imports resolve against the agent&rsquo;s own
+            dependencies.
           </p>
         </div>
         <textarea
@@ -244,7 +244,13 @@ function PluginRowView({
       <EndCell>
         <div className="flex items-center justify-end gap-2">
           <StatusText tone={plugin.enabled ? "ok" : "dim"}>
-            {plugin.builtin ? (plugin.enabled ? "loaded" : "inactive") : plugin.enabled ? "loaded" : "disabled"}
+            {plugin.builtin
+              ? plugin.enabled
+                ? "loaded"
+                : "inactive"
+              : plugin.enabled
+                ? "loaded"
+                : "disabled"}
           </StatusText>
           {plugin.read_only ? null : (
             <>

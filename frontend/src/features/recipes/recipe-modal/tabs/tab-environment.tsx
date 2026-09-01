@@ -91,7 +91,6 @@ export function RecipeModalTabEnvironment({
           Passed directly to the {capabilities.backend} CLI. These override form fields.
         </p>
       </FormSection>
-
     </div>
   );
 }

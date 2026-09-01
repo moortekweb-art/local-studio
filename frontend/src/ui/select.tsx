@@ -42,10 +42,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
   return (
     <div>
       {label && (
-        <label
-          htmlFor={selectId}
-          className={FIELD_LABEL_CLASS}
-        >
+        <label htmlFor={selectId} className={FIELD_LABEL_CLASS}>
           {label}
         </label>
       )}

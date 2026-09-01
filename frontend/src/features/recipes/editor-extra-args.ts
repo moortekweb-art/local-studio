@@ -24,7 +24,6 @@ for (const key of INTERNAL_RECIPE_KEYS) {
 
 ["envVars", "default-chat-template-kwargs"].forEach(addReservedKeys);
 
-
 export const filterExtraArgsForEditor = (
   extraArgs: Record<string, unknown>,
 ): Record<string, unknown> => {

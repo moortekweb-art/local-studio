@@ -25,7 +25,8 @@ export function RuntimeStrip({
   const backends = runtimeSummary ? backendFacts(runtimeSummary) : [];
   const platform = runtimeSummary ? platformFact(runtimeSummary) : null;
   const degraded = (services ?? []).filter((service) => service.status !== "ok");
-  const hasAnything = backends.length > 0 || platform || lease?.holder || (services ?? []).length > 0;
+  const hasAnything =
+    backends.length > 0 || platform || lease?.holder || (services ?? []).length > 0;
   if (!hasAnything) return null;
 
   return (
@@ -38,7 +39,9 @@ export function RuntimeStrip({
         {lease?.holder ? (
           <Fact
             label="lease"
-            value={lease.since ? `${lease.holder} · ${formatRelativeTime(lease.since)}` : lease.holder}
+            value={
+              lease.since ? `${lease.holder} · ${formatRelativeTime(lease.since)}` : lease.holder
+            }
             title="Which host currently owns the right to launch models"
           />
         ) : null}

@@ -112,8 +112,7 @@ export async function startAgentRuntime(
       // The desktop app is a single user browsing their own network: LAN and
       // tailnet (CGNAT) URLs are the embedded browser's day job here, not an
       // SSRF surface. Shared deployments leave this unset and stay strict.
-      LOCAL_STUDIO_BROWSER_ALLOW_PRIVATE:
-        process.env.LOCAL_STUDIO_BROWSER_ALLOW_PRIVATE || "1",
+      LOCAL_STUDIO_BROWSER_ALLOW_PRIVATE: process.env.LOCAL_STUDIO_BROWSER_ALLOW_PRIVATE || "1",
     },
   });
 
