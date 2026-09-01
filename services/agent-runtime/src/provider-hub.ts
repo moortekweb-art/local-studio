@@ -17,7 +17,6 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type {
   AuthEvent,
@@ -120,47 +119,14 @@ async function createHubRuntime(): Promise<ModelRuntime> {
   await mkdir(nativeAgentDir, { recursive: true });
   await chmod(modelsDir, 0o700).catch(() => undefined);
   await chmod(nativeAgentDir, 0o700).catch(() => undefined);
-  const runtime = await ModelRuntime.create({
+  return ModelRuntime.create({
     authPath: path.join(nativeAgentDir, "auth.json"),
     modelsPath: path.join(modelsDir, "models.json"),
   });
-  await registerE2EProviders(runtime);
-  return runtime;
-}
-
-// Test seam: LOCAL_STUDIO_E2E_PROVIDERS names a module whose default export is
-// a map of providerId -> pi ProviderConfigInput (may include a scripted oauth
-// implementation). Registered only when the env var is set, so the hermetic
-// e2e suite can exercise the real login/token/request pipeline offline.
-async function registerE2EProviders(runtime: ModelRuntime): Promise<void> {
-  const modulePath = process.env["LOCAL_STUDIO_E2E_PROVIDERS"];
-  if (!modulePath) return;
-  const imported = (await import(pathToFileURL(modulePath).href)) as {
-    default?: Record<string, unknown>;
-  };
-  for (const [providerId, config] of Object.entries(imported.default ?? {})) {
-    runtime.registerProvider(providerId, config as Parameters<ModelRuntime["registerProvider"]>[1]);
-  }
 }
 
 function hubPromise(): Promise<ModelRuntime> {
   return getGlobalSingleton("providerHubRuntime", createHubRuntime);
-}
-
-// The agent-runtime process is the single hub authority: it runs sessions,
-// serves the login routes, and owns the ModelRuntime. The Next server also
-// bundles this module but must never instantiate pi's runtime — it asks the
-// agent runtime over HTTP instead (see pi-runtime-models.ts).
-function processRole(): { isAgentRuntime: boolean } {
-  return getGlobalSingleton("providerHubProcessRole", () => ({ isAgentRuntime: false }));
-}
-
-export function markAgentRuntimeProcess(): void {
-  processRole().isAgentRuntime = true;
-}
-
-export function isAgentRuntimeProcess(): boolean {
-  return processRole().isAgentRuntime;
 }
 
 function jobsMap(): Map<string, LoginJob> {
@@ -172,10 +138,9 @@ export function getProviderHub(): Promise<ModelRuntime> {
 }
 
 /** Re-read models.json after Local Studio rewrites it (controller refresh). */
-export async function reloadProviderHub(): Promise<void> {
+export async function refreshProviderHub(): Promise<void> {
   const runtime = await hubPromise();
-  await runtime.reloadConfig();
-  await registerE2EProviders(runtime);
+  await runtime.refresh({ allowNetwork: false });
 }
 
 export async function listProviders(): Promise<ProviderView[]> {

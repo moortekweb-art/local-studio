@@ -1,8 +1,48 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { SessionActivity } from "@/features/agent/session-index";
+import { Spinner } from "@/ui";
 import { PinIcon } from "@/ui/icon-registry";
 import { ChevronDownIcon } from "@/ui/icons";
+
+/** The trailing status mark every session row shows: spinner while running,
+ *  green dot when a run finished, accent dot for unseen activity. Layout
+ *  differs per host — the project tree reserves a w-8 spinner column and lets
+ *  its flex-1 label push the dots right, the recents list right-aligns each
+ *  mark itself — so the wrapper classes come from the caller. */
+export function SessionStatusMark({
+  activity,
+  runningClass,
+  dotClass,
+}: {
+  activity: SessionActivity;
+  runningClass: string;
+  dotClass: string;
+}) {
+  if (activity === "running") {
+    return (
+      <span className={runningClass} aria-label="Session running">
+        <Spinner size="xs" className="text-(--link)" />
+      </span>
+    );
+  }
+  if (activity === "finished") {
+    return (
+      <span className={`${dotClass} bg-(--ok)`} aria-label="Run finished" title="Run finished" />
+    );
+  }
+  if (activity === "unseen") {
+    return (
+      <span
+        className={`${dotClass} bg-(--link)`}
+        aria-label="Unseen activity"
+        title="Unseen activity"
+      />
+    );
+  }
+  return null;
+}
 
 /** The one pin control for every sidebar row (sessions and projects). It sits in
  *  the row's hover action cluster and, once pinned, stays lit as the pinned
@@ -26,11 +66,12 @@ export function PinButton({
       }}
       aria-label={pinned ? `Unpin ${target}` : `Pin ${target}`}
       title={pinned ? "Unpin" : "Pin"}
-      className={`inline-flex h-5 w-5 items-center justify-center rounded-[var(--rad-xs)] transition-[opacity,color] hover:text-(--fg) ${
-        pinned
-          ? "text-(--fg)/75 opacity-100"
-          : "text-(--dim)/70 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
-      }`}
+      // Hidden at rest even when pinned — living in the Pinned section already
+      // says so, and an always-on glyph collided with the date column. On hover
+      // it slides in from the left over the trailing text with a fade.
+      className={`inline-flex h-5 w-5 items-center justify-center rounded-[var(--rad-xs)] transition-[opacity,transform,color] duration-150 hover:text-(--fg) ${
+        pinned ? "text-(--fg)/75" : "text-(--dim)/70"
+      } ${"-translate-x-1.5 opacity-0 group-hover:translate-x-0 group-hover:opacity-100 focus-visible:translate-x-0 focus-visible:opacity-100 pointer-coarse:translate-x-0 pointer-coarse:opacity-100"}`}
     >
       <PinIcon className="pointer-events-none h-3 w-3" />
     </button>
@@ -64,7 +105,7 @@ export function SidebarSectionHeader({
 }) {
   return (
     <div
-      className="group flex cursor-default items-center justify-between px-2 pb-1 pt-5 text-[length:var(--fs-sm)] font-normal text-(--hl2)"
+      className="group flex cursor-default items-center justify-between pe-0.5 ps-2 pb-1 pt-5 text-[length:var(--fs-md)] font-medium text-(--hl2) opacity-75 transition-opacity group-hover:opacity-100"
       draggable={draggable}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}

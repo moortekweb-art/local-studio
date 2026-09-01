@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
 import type { AgentImageInput } from "../../../shared/agent/agent-image-input";
+import type { AgentQueueAction } from "../../../shared/agent/agent-turn";
 import {
   applyRuntimeEnvInjections,
   buildAgentSessionOptionsSync,
@@ -21,125 +22,96 @@ import {
   resolveAgentCwdEffect,
   type RuntimeStartOptions,
 } from "./pi-runtime-helpers";
-import { refreshPiModels, resolvePiModelSelection } from "./pi-runtime-models";
+import {
+  refreshPiModels,
+  resolvePiModelSelection,
+  toPiThinkingLevel,
+} from "./pi-runtime-models";
 import { getProviderHub } from "./provider-hub";
 import { attachGoalDriver } from "./goal-driver";
 import { createGoalPromptExtension } from "./goal-prompt";
-import { findRuntimeSessionForLookup, piStatusFromEvents } from "./pi-runtime-state";
 import { configuredPiSessionDir, findSessionFile } from "./sessions-store";
 import { getGlobalSingleton } from "./instances";
 import { connectorsRevisionSync } from "./connectors-service";
+import { userPluginsRevisionSync } from "./user-plugins";
 import type {
   LoggedPiEvent,
   PiAgentSession,
   PiAgentStatus,
   PiContextUsage,
-  PiDurablePromptBoundary,
-  PiDurablePromptMarker,
   PiPromptOptions,
 } from "./pi-runtime-types";
 
 type PiEvent = LoggedPiEvent["event"];
 
-type DurableSessionManager = Pick<
-  SessionManager,
-  "appendCustomEntry" | "getCwd" | "getEntries" | "getSessionFile" | "getSessionId"
->;
+function comparableQueuedText(text: string): string {
+  const marker = "\n\nUser prompt:\n";
+  const index = text.lastIndexOf(marker);
+  return (index === -1 ? text : text.slice(index + marker.length)).trim();
+}
+
+function takeQueuedFollowUp(
+  followUp: readonly string[],
+  message: string,
+): { selected: string; before: string[]; after: string[] } | null {
+  const exactIndex = followUp.indexOf(message);
+  const target = comparableQueuedText(message);
+  const index =
+    exactIndex >= 0
+      ? exactIndex
+      : followUp.findIndex((candidate) => comparableQueuedText(candidate) === target);
+  if (index < 0) return null;
+  return {
+    selected: followUp[index]!,
+    before: followUp.slice(0, index),
+    after: followUp.slice(index + 1),
+  };
+}
+
+function planQueuedFollowUpMutation(
+  followUp: readonly string[],
+  message: string,
+  action: AgentQueueAction,
+  replacement?: string,
+): { promoted: string | null; followUp: string[] } | null {
+  const selected = takeQueuedFollowUp(followUp, message);
+  if (!selected) return null;
+  if (action === "replace" && !replacement) {
+    throw new Error("Replacement text is required.");
+  }
+  return {
+    promoted: action === "promote" ? selected.selected : null,
+    followUp:
+      action === "replace"
+        ? [...selected.before, replacement!, ...selected.after]
+        : [...selected.before, ...selected.after],
+  };
+}
+
+type QueueTransport = {
+  steer: (message: string, images?: AgentImageInput[]) => Promise<void>;
+  followUp: (message: string, images?: AgentImageInput[]) => Promise<void>;
+};
+
+async function restoreQueuedMessages(
+  session: QueueTransport,
+  cleared: { steering: readonly string[]; followUp: readonly string[] },
+  mutation: { promoted: string | null; followUp: readonly string[] } | null,
+  images: AgentImageInput[] = [],
+): Promise<void> {
+  for (const queued of cleared.steering) await session.steer(queued);
+  if (mutation?.promoted) await session.steer(mutation.promoted, images);
+  for (const queued of mutation?.followUp ?? cleared.followUp) await session.followUp(queued);
+}
+
 
 /** Appended to the system prompt for vision-capable models. Kept as an extra
  *  section rather than a replacement so first-party extensions still apply. */
 const VISION_GUIDANCE =
   "When an image is attached, inspect it carefully before answering. State only details visible in the image. Never invent labels, UI elements, text, or facts. Say when details are too small or uncertain. Give a concise answer. Use available tools to inspect supplied files when helpful.";
 
-const messageText = (message: unknown): string | null => {
-  if (!message || typeof message !== "object" || Array.isArray(message)) return null;
-  const record = message as Record<string, unknown>;
-  if (record.role !== "user") return null;
-  if (typeof record.content === "string") return record.content;
-  if (!Array.isArray(record.content)) return null;
-  let text = "";
-  for (const part of record.content) {
-    if (!part || typeof part !== "object" || Array.isArray(part)) continue;
-    const item = part as Record<string, unknown>;
-    if (item.type === "text" && typeof item.text === "string") text += item.text;
-  }
-  return text;
-};
 
-export function persistLitterPromptBoundary(input: {
-  sessionManager: DurableSessionManager;
-  startEntryCount: number;
-  message: string;
-  marker: PiDurablePromptMarker;
-  modelId: string;
-}): PiDurablePromptBoundary {
-  const beforeMarker = input.sessionManager.getEntries();
-  const matches = beforeMarker.slice(input.startEntryCount).filter((entry) => {
-    if (!entry || typeof entry !== "object" || !("message" in entry)) return false;
-    return messageText(entry.message) === input.message;
-  });
-  if (matches.length !== 1) throw new Error("Prompt transcript boundary is ambiguous");
-  const userEntryId = matches[0]?.id;
-  const piSessionId = input.sessionManager.getSessionId();
-  const sessionFile = input.sessionManager.getSessionFile();
-  const cwd = input.sessionManager.getCwd();
-  if (!userEntryId || !piSessionId || !sessionFile || !cwd || !input.modelId) {
-    throw new Error("Prompt transcript boundary identity is incomplete");
-  }
-  const markerEntryId = input.sessionManager.appendCustomEntry("local_studio_litter_turn_v1", {
-    version: 1,
-    dispatchId: input.marker.dispatchId,
-    messageId: input.marker.messageId,
-    contentHash: input.marker.contentHash,
-    userEntryId,
-  });
-  const markerEntry = input.sessionManager.getEntries().find((entry) => entry.id === markerEntryId);
-  if (!markerEntry || typeof markerEntry.timestamp !== "string") {
-    throw new Error("Prompt transcript marker was not persisted");
-  }
-  const descriptor = openSync(sessionFile, constants.O_RDONLY);
-  try {
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
-  }
-  const size = statSync(sessionFile).size;
-  const length = Math.min(size, 256 * 1024);
-  const buffer = Buffer.allocUnsafe(length);
-  const reader = openSync(sessionFile, constants.O_RDONLY);
-  let bytesRead = 0;
-  try {
-    bytesRead = readSync(reader, buffer, 0, length, size - length);
-  } finally {
-    closeSync(reader);
-  }
-  const encodedMarker = buffer
-    .subarray(0, bytesRead)
-    .toString("utf8")
-    .split("\n")
-    .filter(Boolean)
-    .find((line) => {
-      try {
-        const entry = JSON.parse(line) as Record<string, unknown>;
-        return entry.id === markerEntryId && entry.customType === "local_studio_litter_turn_v1";
-      } catch {
-        return false;
-      }
-    });
-  if (!encodedMarker) throw new Error("Prompt transcript marker durability check failed");
-  return {
-    dispatchId: input.marker.dispatchId,
-    markerEntryId,
-    userEntryId,
-    piSessionId,
-    sessionFile,
-    cwd,
-    modelId: input.modelId,
-    acceptedAt: markerEntry.timestamp,
-  };
-}
-
-export function selectPiRuntimeModel(
+function selectPiRuntimeModel(
   models: Awaited<ReturnType<typeof refreshPiModels>>["models"],
   requestedModelId: string,
 ) {
@@ -163,14 +135,6 @@ export function selectPiRuntimeModel(
   return null;
 }
 
-export function resolvePiRuntimeStartOptions(
-  current: RuntimeStartOptions,
-  running: boolean,
-  requested?: RuntimeStartOptions,
-): RuntimeStartOptions {
-  return structuredClone(requested ?? (running ? current : {}));
-}
-
 function runtimeFingerprint(
   modelId: string,
   cwd: string,
@@ -183,10 +147,17 @@ function runtimeFingerprint(
     piSessionId: piSessionId ?? "",
     options: runtimeOptionsFingerprint(options),
     connectors: connectorsRevisionSync(),
+    // pi snapshots its extension inventory once, when the session starts, so a
+    // plugin the user just wrote is invisible to a session that is already
+    // running. Folding the extensions directory's revision in here rebuilds the
+    // session on the next turn — the same deal connectors get, and the reason
+    // the Plugins tab can promise "save, then send your next message" instead
+    // of "restart the app".
+    plugins: userPluginsRevisionSync(),
   });
 }
 
-export function shouldRestartAfterPromptError(error: unknown): boolean {
+function shouldRestartAfterPromptError(error: unknown): boolean {
   return (
     error instanceof Error && /Cannot continue from message role: assistant/i.test(error.message)
   );
@@ -224,6 +195,8 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
   private currentModelId = "";
   private currentStartOptions: RuntimeStartOptions = {};
   private agentDir = "";
+  private queueEventBufferDepth = 0;
+  private bufferedQueueEvent: PiEvent | null = null;
   private extensionUiPending = new Map<
     string,
     { method: "select" | "confirm" | "input" | "editor"; resolve: (value: unknown) => void }
@@ -235,10 +208,8 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
     piSessionId?: string | null,
     options?: RuntimeStartOptions,
   ): Promise<void> {
-    const effectiveOptions = resolvePiRuntimeStartOptions(
-      this.currentStartOptions,
-      Boolean(this.runtime),
-      options,
+    const effectiveOptions = structuredClone(
+      options ?? (this.runtime ? this.currentStartOptions : {}),
     );
     return Effect.runPromise(this.ensureStartedEffect(modelId, cwd, piSessionId, effectiveOptions));
   }
@@ -277,14 +248,13 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
         const backendModelId = selectedModel.rawId ?? resolvedSelection.modelId;
 
         // One shared ModelRuntime across sessions and the provider hub: a
-        // sign-in completed in settings is live for the next turn, and
-        // hub-registered providers (including the e2e seam) resolve here.
+        // sign-in completed in settings is live for the next turn.
         const sharedModelRuntime = yield* Effect.tryPromise({
           try: () => getProviderHub(),
           catch: (error) => error,
         });
 
-        const sessionOptions = buildAgentSessionOptionsSync({ options });
+        const sessionOptions = buildAgentSessionOptionsSync({ options, cwd: resolvedCwd });
         applyRuntimeEnvInjections(sessionOptions.envInjections);
         // Expose the current session's model so the automations extension can
         // default a scheduled run to the same model the user is talking to.
@@ -330,7 +300,7 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
                             // Vision guidance is APPENDED, not substituted. This branch used to
                             // set noExtensions/noSkills/noContextFiles and replace the whole
                             // system prompt, which silently disabled every first-party extension
-                            // (session goal, artifact policy, plan, subagents) on any
+                            // (session goal, artifact policy, subagents) on any
                             // vision-capable model — i.e. on the primary model.
                             ...(selectedModel.vision
                               ? {
@@ -360,7 +330,7 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
                           sessionStartEvent,
                           model,
                           thinkingLevel: selectedModel.reasoning
-                            ? (options.thinkingLevel ?? "high")
+                            ? toPiThinkingLevel(options.thinkingLevel ?? "high")
                             : undefined,
                         }),
                       catch: (error) => error,
@@ -442,24 +412,6 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
     return Effect.runPromise(this.promptEffect(message, onEvent, options));
   }
 
-  async promptDurably(
-    message: string,
-    onEvent: (event: PiEvent, seq: number) => void,
-    marker: PiDurablePromptMarker,
-    options: PiPromptOptions = {},
-  ): Promise<PiDurablePromptBoundary> {
-    const runtimeSession = this.requireSession();
-    const startEntryCount = runtimeSession.sessionManager.getEntries().length;
-    await this.prompt(message, onEvent, options);
-    return persistLitterPromptBoundary({
-      sessionManager: runtimeSession.sessionManager,
-      startEntryCount,
-      message,
-      marker,
-      modelId: this.currentModelId,
-    });
-  }
-
   private promptEffect(
     message: string,
     onEvent: (event: PiEvent, seq: number) => void,
@@ -525,6 +477,39 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
     return Effect.runPromise(
       Effect.tryPromise({
         try: () => this.requireSession().steer(message, images),
+        catch: (error) => error,
+      }),
+    );
+  }
+
+  mutateQueuedFollowUp(
+    message: string,
+    action: AgentQueueAction,
+    replacement?: string,
+    images: AgentImageInput[] = [],
+  ): Promise<void> {
+    return Effect.runPromise(
+      Effect.tryPromise({
+        try: async () => {
+          const session = this.requireSession();
+          this.queueEventBufferDepth += 1;
+          try {
+            const cleared = session.clearQueue();
+            const mutation = planQueuedFollowUpMutation(
+              cleared.followUp,
+              message,
+              action,
+              replacement,
+            );
+            if (!mutation) {
+              await restoreQueuedMessages(session, cleared, null);
+              throw new Error("Queued follow-up is no longer pending.");
+            }
+            await restoreQueuedMessages(session, cleared, mutation, images);
+          } finally {
+            this.flushBufferedQueueEvent();
+          }
+        },
         catch: (error) => error,
       }),
     );
@@ -617,24 +602,23 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
     }).pipe(Effect.catch(() => Effect.void));
   }
 
-  get status() {
+  get status(): PiAgentStatus {
     const sdkSession = this.runtime?.session;
-    return piStatusFromEvents({
+    const sdkActive =
+      Boolean(sdkSession?.isStreaming) ||
+      Boolean(sdkSession?.isCompacting) ||
+      (sdkSession?.pendingMessageCount ?? 0) > 0;
+    return {
       running: Boolean(this.runtime),
-      activePromptCount: this.activePromptCount,
-      sdkActive:
-        Boolean(sdkSession?.isStreaming) ||
-        Boolean(sdkSession?.isCompacting) ||
-        (sdkSession?.pendingMessageCount ?? 0) > 0,
+      active: this.activePromptCount > 0 || sdkActive,
       modelId: this.currentModelId,
       cwd: this.currentCwd,
       piSessionId: this.currentPiSessionId,
       agentDir: this.agentDir,
       eventSeq: this.eventSeq,
       lastError: this.lastError,
-      eventLog: this.eventLog,
       contextUsage: this.computeContextUsage(),
-    });
+    };
   }
 
   private computeContextUsage() {
@@ -707,8 +691,7 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
         >,
       editor: (title, prefill) =>
         request("editor", { title, prefill }) as Promise<string | undefined>,
-      notify: (message, level = "info") =>
-        this.recordEvent({ type: "notice", level, message }),
+      notify: (message, level = "info") => this.recordEvent({ type: "notice", level, message }),
       setStatus: (key, text) =>
         this.recordEvent({ type: "extension_status", key, text: text ?? null }),
       setTitle: (title) => this.recordEvent({ type: "extension_title", title }),
@@ -737,6 +720,10 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
   }
 
   private recordEvent(event: PiEvent) {
+    if (event.type === "queue_update" && this.queueEventBufferDepth > 0) {
+      this.bufferedQueueEvent = event;
+      return;
+    }
     if (event.type === "session_info_changed" && this.runtime?.session.sessionId) {
       this.currentPiSessionId = this.runtime.session.sessionId;
     }
@@ -750,11 +737,72 @@ class PiSdkSession extends EventEmitter implements PiAgentSession {
     this.emit("loggedEvent", logged);
     this.emit("event", event);
   }
+
+  private flushBufferedQueueEvent() {
+    this.queueEventBufferDepth -= 1;
+    if (this.queueEventBufferDepth !== 0 || !this.bufferedQueueEvent) return;
+    const event = this.bufferedQueueEvent;
+    this.bufferedQueueEvent = null;
+    this.recordEvent(event);
+  }
 }
 
 function piEventsAfter(eventLog: LoggedPiEvent[], seq: number): LoggedPiEvent[] {
   const floor = Number.isFinite(seq) ? Math.max(0, Math.trunc(seq)) : 0;
   return eventLog.filter((entry) => entry.seq > floor);
+}
+
+type RuntimeLookupEntry = {
+  sessionId: string;
+  session: PiAgentSession;
+};
+
+function findRuntimeSessionForLookup(
+  entries: Iterable<RuntimeLookupEntry>,
+  sessionId: string,
+  piSessionId?: string | null,
+): RuntimeLookupEntry | null {
+  const snapshot = [...entries];
+  const exact = snapshot.find((entry) => entry.sessionId === sessionId);
+  const target = piSessionId?.trim();
+  if (!target) return exact ?? null;
+  const matches = snapshot.filter(
+    (entry) =>
+      entry.session.status.piSessionId === target ||
+      (entry.sessionId === sessionId && !entry.session.status.piSessionId),
+  );
+  return matches.reduce<RuntimeLookupEntry | null>(
+    (best, candidate) =>
+      !best || runtimeLookupOutranks(candidate, best, sessionId) ? candidate : best,
+    null,
+  );
+}
+
+function runtimeLookupOutranks(
+  candidate: RuntimeLookupEntry,
+  current: RuntimeLookupEntry,
+  requestedSessionId: string,
+): boolean {
+  const candidateRank = runtimeLookupRank(candidate, requestedSessionId);
+  const currentRank = runtimeLookupRank(current, requestedSessionId);
+  for (let index = 0; index < candidateRank.length; index += 1) {
+    if (candidateRank[index] !== currentRank[index]) {
+      return candidateRank[index] > currentRank[index];
+    }
+  }
+  return false;
+}
+
+function runtimeLookupRank(
+  entry: RuntimeLookupEntry,
+  requestedSessionId: string,
+): [number, number, number, number] {
+  return [
+    entry.session.status.active === true ? 1 : 0,
+    entry.session.status.running === true ? 1 : 0,
+    entry.sessionId === requestedSessionId ? 1 : 0,
+    entry.session.status.eventSeq ?? 0,
+  ];
 }
 
 const DEFAULT_SESSION_ID = "default";

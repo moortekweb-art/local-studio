@@ -25,7 +25,8 @@ import {
 } from "@/lib/api/connection";
 import { scheduleDurableUiPreferencesSave } from "@/lib/desktop-ui-preferences";
 import { DeployControllerPanel } from "./deploy-controller-panel";
-import { StatusPill, Spinner } from "@/ui";
+import { AppVersionSection } from "./app-version-section";
+import { StatusPill, Spinner, type UiTone } from "@/ui";
 import { ApiUrlCensorToggle, useApiUrlCensored } from "@/ui/api-url-censor";
 import {
   SettingsButton,
@@ -33,7 +34,6 @@ import {
   SettingsInput,
   SettingsRow,
   SettingsValue,
-  type StatusTone,
 } from "./settings-ui";
 
 type ControllerEntry = SavedController & { id: string };
@@ -148,6 +148,7 @@ export function ApiConnectionSection({
 
   return (
     <div>
+      <AppVersionSection />
       <SettingsGroup
         title="Controllers"
         description="Every controller is saved in one list. Switch active with the radio button."
@@ -445,8 +446,7 @@ function ApiStatus({
   if (loading) {
     return <StatusPill tone="info">loading</StatusPill>;
   }
-  const tone: StatusTone =
-    status === "connected" ? "good" : status === "error" ? "danger" : "default";
+  const tone: UiTone = status === "connected" ? "good" : status === "error" ? "danger" : "default";
   const label = message || (status === "unknown" ? "not tested" : status);
   return (
     <span className="inline-flex items-center gap-1.5">

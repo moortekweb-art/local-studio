@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import api from "@/lib/api/client";
 import type { ModelDownload, ModelInfo, RecipeWithStatus, RuntimeTarget } from "@/lib/types";
@@ -13,6 +13,7 @@ import { prepareRecipeForSave } from "@/features/recipes/prepare-recipe";
 import { DEFAULT_RECIPE } from "./default-recipe";
 import type { RecipesTableProps } from "./types";
 import { useRecipesDerived } from "./use-recipes-derived";
+import { isRecipeActive } from "./launch-reconciliation";
 
 export type RecipesContentTab = "picks" | "get" | "serves" | "downloads";
 
@@ -21,9 +22,11 @@ const requestedTab = (value: string | null): RecipesContentTab =>
 
 export function useRecipesContentModel() {
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<RecipesContentTab>(() => requestedTab(searchParams.get("tab")));
-  // Stale-while-revalidate: paint the last-loaded recipe list instantly on
-  // navigation while the fresh fetch runs in the background.
+  const urlTab = requestedTab(searchParams.get("tab"));
+  const newRecipeRequested = searchParams.get("new") === "1";
+  const newRecipeHandled = useRef(false);
+  const observedUrlTab = useRef(urlTab);
+  const [tab, setTab] = useState<RecipesContentTab>(urlTab);
   const cachedRecipes = readPageCache<RecipeWithStatus[]>("recipes:list");
   const [loading, setLoading] = useState(cachedRecipes === null);
   const [refreshing, setRefreshing] = useState(false);
@@ -66,7 +69,7 @@ export function useRecipesContentModel() {
     });
   }, []);
 
-  const loadRecipes = useCallback(async () => {
+  const loadRecipes = useCallback(async (): Promise<RecipeWithStatus[]> => {
     try {
       const [recipesData, modelsData, runtimeData] = await Promise.all([
         api.getRecipes().catch(() => ({ recipes: [] as RecipeWithStatus[] })),
@@ -81,8 +84,10 @@ export function useRecipesContentModel() {
       setRunningRecipeId(running);
       setAvailableModels(modelsData.models || []);
       setRuntimeTargets(runtimeData.targets || []);
+      return recipesList;
     } catch (e) {
       console.error("Failed to load recipes:", e);
+      return [];
     }
   }, []);
 
@@ -108,10 +113,21 @@ export function useRecipesContentModel() {
   }, []);
 
   useMountSubscription(() => {
-    if (searchParams.get("new") !== "1") return;
+    const tabChanged = observedUrlTab.current !== urlTab;
+    observedUrlTab.current = urlTab;
+    if (!newRecipeRequested) {
+      newRecipeHandled.current = false;
+      setTab(urlTab);
+      return;
+    }
+    if (newRecipeHandled.current) {
+      if (tabChanged) setTab(urlTab);
+      return;
+    }
+    newRecipeHandled.current = true;
     setTab("serves");
     handleNewRecipe();
-  }, [handleNewRecipe, searchParams]);
+  }, [handleNewRecipe, newRecipeRequested, urlTab]);
 
   const handleCreateServeFromDownload = useCallback((download: ModelDownload) => {
     const modelName = download.model_id.split("/").filter(Boolean).at(-1) ?? download.model_id;
@@ -146,8 +162,6 @@ export function useRecipesContentModel() {
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-|-$/g, "");
-        // A name with no ASCII alphanumerics slugs to "" — an empty id creates
-        // a ghost recipe that can't be edited, deleted, or launched.
         const id = slug || `recipe-${Date.now()}`;
         await api.createRecipe({ ...recipeToSave, id });
       }
@@ -182,7 +196,10 @@ export function useRecipesContentModel() {
         await api.launchRecipe(recipeId);
         await loadRecipes();
       } catch (e) {
-        alert("Failed to launch: " + (e as Error).message);
+        const reconciled = await loadRecipes();
+        if (!isRecipeActive(reconciled, recipeId)) {
+          alert("Failed to launch: " + (e as Error).message);
+        }
       } finally {
         setLaunching(false);
       }

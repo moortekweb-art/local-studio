@@ -12,13 +12,10 @@ import path from "node:path";
 // omitted (they are large and rebuild themselves).
 const MIRRORED_ENTRIES = [
   "pi-agent",
-  "agent-plan",
   "agent-session-metadata.json",
   "automations",
   "goals",
   "mcp",
-  "chats.db",
-  "controller.db",
   "controllers.json",
   "connectors.json",
   "projects.json",
@@ -32,9 +29,6 @@ const MIRRORED_ENTRIES = [
 // Deliberately NOT mirrored, and it should stay that way:
 //   oauth/, oauth-vault.json, google-account.json — duplicating credentials into
 //     a second app is not something to do silently; sign in to dev separately.
-//   litter-bridge.json, litter-controller-id, litter-mutation-idempotency.sqlite
-//     — device identity. Two apps claiming one controller id would make the
-//     mobile bridge ambiguous about which install it is talking to.
 //   logs/, runtime/, computer-use/, *.pid, *.port — per-install runtime state.
 
 export type DevMirrorResult = { copied: string[]; skipped: string[] };

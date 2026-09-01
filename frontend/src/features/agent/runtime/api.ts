@@ -9,7 +9,11 @@ import {
   parseAgentTurnCommandResult,
   type AgentTurnCommandResult,
 } from "@/features/agent/messages";
-import type { AgentImageInput, AgentToolAccess } from "@/features/agent/contracts";
+import type {
+  AgentImageInput,
+  AgentQueueAction,
+  AgentToolAccess,
+} from "@/features/agent/contracts";
 import type { BrowserBackend } from "@/features/agent/tools/types";
 import type {
   ComposerPromptTemplateRef,
@@ -50,6 +54,33 @@ const safeJsonEffect = <T>(response: Response): Effect.Effect<T, unknown> =>
     catch: (error) => error,
   });
 
+const AbortSessionResponseSchema = Schema.Struct({
+  ok: Schema.Boolean,
+  cleared: Schema.Struct({
+    steering: Schema.Array(Schema.String),
+    followUp: Schema.Array(Schema.String),
+  }),
+});
+
+const decodeAbortSessionResponse = Schema.decodeUnknownOption(AbortSessionResponseSchema, {
+  onExcessProperty: "preserve",
+});
+
+export type AbortSessionResult = {
+  steering: string[];
+  followUp: string[];
+};
+
+export function parseAbortSessionResult(input: unknown): AbortSessionResult {
+  const decoded = decodeAbortSessionResponse(input);
+  return decoded._tag === "Some"
+    ? {
+        steering: [...decoded.value.cleared.steering],
+        followUp: [...decoded.value.cleared.followUp],
+      }
+    : { steering: [], followUp: [] };
+}
+
 export function listRuntimeSessions(): Promise<RuntimeSessionSummary[]> {
   return Effect.runPromise(
     Effect.gen(function* () {
@@ -79,16 +110,17 @@ export function loadRuntimeStatus(
   );
 }
 
-export function abortSession(sessionId: string): Promise<void> {
+export function abortSession(sessionId: string): Promise<AbortSessionResult> {
   return Effect.runPromise(
-    fetchEffect("/api/agent/abort", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId }),
-    }).pipe(
-      Effect.map(() => undefined),
-      Effect.catch(() => Effect.succeed(undefined)),
-    ),
+    Effect.gen(function* () {
+      const response = yield* fetchEffect("/api/agent/abort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const payload = yield* safeJsonEffect<unknown>(response);
+      return parseAbortSessionResult(payload);
+    }).pipe(Effect.catch(() => Effect.succeed({ steering: [], followUp: [] }))),
   );
 }
 
@@ -226,6 +258,8 @@ export type SubmitTurnArgs = {
   piSessionId?: string | null;
   /** Control mode for steer/follow-up; omitted for a normal prompt. */
   mode?: "steer" | "follow_up";
+  queueAction?: AgentQueueAction;
+  queueReplacement?: string;
   browserToolEnabled: boolean;
   browserSessionId?: string;
   browserBackend?: BrowserBackend;
@@ -304,14 +338,26 @@ function decodeSessionGoal(raw: unknown): SessionGoal | null {
 const sessionGoalUrl = (piSessionId: string) =>
   `/api/agent/goal?piSessionId=${encodeURIComponent(piSessionId)}`;
 
-export function loadSessionGoal(piSessionId: string): Promise<SessionGoal | null> {
+/**
+ * "No goal" and "the request failed" are different answers: the first should
+ * clear the strip, the second should leave the last known goal alone. When
+ * both collapsed to null, one flaky poll made the goal vanish for a poll
+ * interval and reappear — which reads as data loss.
+ */
+export type SessionGoalLoad = { ok: true; goal: SessionGoal | null } | { ok: false };
+
+export function loadSessionGoal(piSessionId: string): Promise<SessionGoalLoad> {
   return Effect.runPromise(
     Effect.gen(function* () {
       const response = yield* fetchEffect(sessionGoalUrl(piSessionId), { cache: "no-store" });
-      if (!response.ok) return null;
+      if (!response.ok) {
+        return response.status === 404
+          ? ({ ok: true, goal: null } as SessionGoalLoad)
+          : ({ ok: false } as SessionGoalLoad);
+      }
       const payload = yield* safeJsonEffect<unknown>(response);
-      return decodeSessionGoal(payload);
-    }).pipe(Effect.catch(() => Effect.succeed(null))),
+      return { ok: true, goal: decodeSessionGoal(payload) } as SessionGoalLoad;
+    }).pipe(Effect.catch(() => Effect.succeed<SessionGoalLoad>({ ok: false }))),
   );
 }
 

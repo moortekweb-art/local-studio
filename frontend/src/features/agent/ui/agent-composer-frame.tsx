@@ -14,7 +14,6 @@ import type {
   ComposerPromptTemplateRef,
   ComposerSkillRef,
 } from "@/features/agent/composer-context";
-import type { QueuedMessage } from "@/features/agent/messages";
 import type { BrowserBackend } from "@/features/agent/tools/types";
 import type { ComposerBanner } from "@/features/agent/composer/composer-visual-state";
 import { Spinner } from "@/ui";
@@ -31,6 +30,8 @@ import {
 import { AgentComposerStatusBar } from "./agent-composer-status-bar";
 import { AgentComposerTextArea } from "./agent-composer-textarea";
 import { cx } from "@/ui/utils";
+import { Target } from "@/ui/icon-registry";
+import { CloseIcon } from "@/ui/icons";
 
 export type AgentComposerFrameProps = {
   attachments: AgentComposerAttachment[];
@@ -58,26 +59,21 @@ export type AgentComposerFrameProps = {
   onComposerDrop: DragEventHandler<HTMLDivElement>;
   onComposerKeyDown: KeyboardEventHandler<HTMLTextAreaElement>;
   onComposerPaste: ClipboardEventHandler<HTMLTextAreaElement>;
-  onEditQueued: (queueId: string, text: string) => void;
   onInitGit?: () => void;
   onOpenStatus: () => void;
   onOpenDiff: () => void;
-  onQueueExpandedChange: (expanded: boolean) => void;
   onRemoveAttachment: (id: string) => void;
   onRemoveLoadedContext: (kind: LoadedContextKind, id: string) => void;
-  onRemoveQueued: (queueId: string) => void;
   onSelectMention: (entry: MentionRow) => void;
-  onSteerQueued: (queueId: string) => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
-  onTranscript: (text: string) => void;
   onToggleBrowserBackend: () => void;
   onToggleBrowserTool: () => void;
   placeholder: string;
+  goalMode?: boolean;
+  onExitGoalMode?: () => void;
   drawer?: ReactNode;
   showStatusBar: boolean;
   promptTemplates: ComposerPromptTemplateRef[];
-  queueExpanded: boolean;
-  queueItems: QueuedMessage[];
   readingAttachments: boolean;
   running: boolean;
   selectedSkills: ComposerSkillRef[];
@@ -113,26 +109,21 @@ export function AgentComposerFrame({
   onComposerDrop,
   onComposerKeyDown,
   onComposerPaste,
-  onEditQueued,
   onInitGit,
   onOpenStatus,
   onOpenDiff,
-  onQueueExpandedChange,
   onRemoveAttachment,
   onRemoveLoadedContext,
-  onRemoveQueued,
   onSelectMention,
-  onSteerQueued,
   onSubmit,
-  onTranscript,
   onToggleBrowserBackend,
   onToggleBrowserTool,
   placeholder,
+  goalMode = false,
+  onExitGoalMode,
   drawer,
   showStatusBar,
   promptTemplates,
-  queueExpanded,
-  queueItems,
   readingAttachments,
   running,
   selectedSkills,
@@ -154,7 +145,7 @@ export function AgentComposerFrame({
       )}
     >
       {banner ? (
-        <div className="mx-auto flex w-full max-w-[calc(var(--composer-w)*0.9)] items-center gap-2 pb-3 pl-1 text-[length:var(--codex-chat-font-size)] text-(--fg)/35 sm:w-[90%]">
+        <div className="mx-auto flex w-full max-w-[calc(var(--composer-w)*0.9)] items-center gap-2 pb-2 pl-1 text-[length:var(--fs-sm)] text-(--fg)/35 sm:w-[90%]">
           <Spinner size="xs" />
           {banner.label}
         </div>
@@ -179,6 +170,28 @@ export function AgentComposerFrame({
           promptTemplates={promptTemplates}
           onRemove={onRemoveLoadedContext}
         />
+        {goalMode ? (
+          <div className="flex items-center gap-1.5 px-3 pt-2.5">
+            {/* Themed, not amber-500. A literal Tailwind colour was the one
+                hardcoded hue in the composer chrome and read as foreign on the
+                other ~15 themes; --accent has a bare-:root baseline. */}
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-(--accent)/30 bg-(--accent)/10 py-0.5 pl-2 pr-1 text-[length:var(--fs-sm)] font-medium text-(--accent)">
+              <Target className="size-3.5" aria-hidden />
+              Goal
+              <button
+                type="button"
+                onClick={onExitGoalMode}
+                aria-label="Exit goal mode"
+                className="rounded-full p-0.5 text-(--accent)/70 transition-colors hover:bg-(--accent)/15 hover:text-(--accent)"
+              >
+                <CloseIcon className="size-3" />
+              </button>
+            </span>
+            <span className="text-[length:var(--fs-sm)] text-(--fg)/40">
+              Enter sends this as the session objective
+            </span>
+          </div>
+        ) : null}
         {mention ? (
           <div className={`absolute inset-x-0 bottom-full z-20 mb-2 ${POPOVER_MENU_CLASS}`}>
             <AgentMentionPicker
@@ -215,7 +228,6 @@ export function AgentComposerFrame({
           onToggleBrowserBackend={onToggleBrowserBackend}
           onToggleBrowserTool={onToggleBrowserTool}
           onAbortTurn={onAbortTurn}
-          onTranscript={onTranscript}
           modelSelector={modelSelector}
         />
       </div>
@@ -233,7 +245,7 @@ export function AgentComposerFrame({
       ) : (
         <div
           aria-hidden="true"
-          className="mx-auto mt-2 h-3 w-full max-w-[calc(var(--composer-w)*0.9)] sm:mt-2.5 sm:h-4 sm:w-[90%]"
+          className="mx-auto mt-1.5 h-2 w-full max-w-[calc(var(--composer-w)*0.9)] sm:h-2.5 sm:w-[90%]"
         />
       )}
     </form>

@@ -3,6 +3,7 @@
 import {
   useCallback,
   useMemo,
+  useRef,
   useState,
   type ComponentType,
   type KeyboardEvent,
@@ -11,14 +12,11 @@ import {
   Activity,
   FolderTree,
   GitBranch,
-  GitPullRequest,
   Globe2,
-  ListChecks,
   MessageSquarePlus,
   PanelRight,
   PanelRightFilled,
   Plus,
-  ScanSearch,
   TerminalSquare,
   type LucideIcon,
 } from "@/ui/icon-registry";
@@ -39,6 +37,7 @@ import {
   sanitizeLocalFileUrl,
 } from "@/features/agent/sanitize-embedded-browser-url";
 import { useTools } from "@/features/agent/tools/context";
+import { useMountSubscription } from "@/hooks/use-mount-subscription";
 import type { ComputerTab } from "@/features/agent/tools/types";
 import type { GitSummary, Project } from "@/features/agent/projects/types";
 import type { Session } from "@/features/agent/runtime/types";
@@ -49,11 +48,7 @@ import {
   terminalOwnerLabel,
   type TerminalOwner,
 } from "@/features/agent/terminal-owners";
-import {
-  ComputerTabPanel,
-  type SideChatDraft,
-  type SideChatTabsUpdater,
-} from "@/features/agent/ui/computer-tab-panel";
+import { ComputerTabPanel, type SideChatTabsUpdater } from "@/features/agent/ui/computer-tab-panel";
 import { PersistentTerminals } from "@/features/agent/ui/persistent-terminals";
 import type { WorkspaceHandles } from "@/features/agent/ui/use-workspace";
 
@@ -113,7 +108,13 @@ function closePersistedTerminalOwner(ownerKey: string) {
 }
 
 function acceptedBrowserUrl(url: string): string | null {
-  return /^file:\/\//i.test(url) ? sanitizeLocalFileUrl(url) : sanitizeBrowserPaneUrl(url);
+  // allowPrivate here is only a syntax pass — the runtime is the policy
+  // authority and rejects private hosts when its allow-private switch is off.
+  // Refusing them client-side too would make the address bar silently eat
+  // tailnet/LAN URLs on the desktop, where they are allowed.
+  return /^file:\/\//i.test(url)
+    ? sanitizeLocalFileUrl(url)
+    : sanitizeBrowserPaneUrl(url, { allowPrivate: true });
 }
 
 export function AgentBrowserPanel({
@@ -134,7 +135,6 @@ export function AgentBrowserPanel({
   const sideChatSession =
     sessions.find((session) => session.id === sideChatSeed.id) ?? sideChatSeed;
   const { registerComputerAside, startComputerResize } = handles;
-  const isElectron = typeof navigator !== "undefined" && /electron/i.test(navigator.userAgent);
   const terminalOwner = useMemo(
     () => terminalOwnerFor(activeProject, focusedSession),
     [activeProject, focusedSession],
@@ -193,35 +193,20 @@ export function AgentBrowserPanel({
       body: JSON.stringify({ url: accepted }),
     }).catch(() => undefined);
   };
-  const openSideChat = useCallback(
-    (draft?: SideChatDraft) => {
-      if (draft) {
-        const next = createSideChatSession(activeProject ?? null, focusedSession, activeModelId);
-        const drafted = {
-          ...next,
-          title: draft.title.trim().slice(0, 80) || "Plan task",
-          input: draft.input,
-        };
-        setSideChatSeed(drafted);
-        handles.updateDetachedSession(drafted, () => drafted);
-        tools.setComputerTab("side-chat");
-        return;
-      }
-      handles.updateDetachedSession(sideChatSeed, (current) =>
-        current.messages.length
-          ? current
-          : {
-              ...current,
-              status: current.status === "loading" ? "idle" : current.status,
-              cwd: focusedSession?.cwd ?? activeProject?.path,
-              projectId: focusedSession?.projectId ?? activeProject?.id,
-              modelId: current.modelId || focusedSession?.modelId || activeModelId,
-            },
-      );
-      tools.setComputerTab("side-chat");
-    },
-    [activeModelId, activeProject, focusedSession, handles, sideChatSeed, tools],
-  );
+  const openSideChat = useCallback(() => {
+    handles.updateDetachedSession(sideChatSeed, (current) =>
+      current.messages.length
+        ? current
+        : {
+            ...current,
+            status: current.status === "loading" ? "idle" : current.status,
+            cwd: focusedSession?.cwd ?? activeProject?.path,
+            projectId: focusedSession?.projectId ?? activeProject?.id,
+            modelId: current.modelId || focusedSession?.modelId || activeModelId,
+          },
+    );
+    tools.setComputerTab("side-chat");
+  }, [activeModelId, activeProject, focusedSession, handles, sideChatSeed, tools]);
   const updateSideChatTabs = useCallback(
     (nextTabsOrUpdater: SideChatTabsUpdater) => {
       handles.updateDetachedSession(sideChatSeed, (current) => {
@@ -247,6 +232,34 @@ export function AgentBrowserPanel({
     setSideChatSeed(createSideChatSession(activeProject ?? null, focusedSession, activeModelId));
     tools.closeComputerTab("side-chat");
   }, [activeModelId, activeProject, focusedSession, handles, sideChatSeed.id, tools]);
+  // Open an existing session (a subagent's) in the side-chat pane: swap in a
+  // tab seeded with its piSessionId, and ChatPane's hydration effect replays
+  // the transcript. The request already switched the panel to this tab. Same
+  // id-guarded subscription shape as the composer's context-attach consumer.
+  const sessionPreviewRequest = tools.sessionPreviewRequest;
+  const handledPreviewRef = useRef(0);
+  useMountSubscription(() => {
+    if (!sessionPreviewRequest || handledPreviewRef.current === sessionPreviewRequest.id) return;
+    handledPreviewRef.current = sessionPreviewRequest.id;
+    const previewTab: Session = {
+      ...makeFreshTab(),
+      title: sessionPreviewRequest.title,
+      piSessionId: sessionPreviewRequest.piSessionId,
+      cwd: sessionPreviewRequest.cwd ?? focusedSession?.cwd ?? activeProject?.path,
+      projectId: focusedSession?.projectId ?? activeProject?.id,
+      modelId: focusedSession?.modelId ?? activeModelId,
+    };
+    handles.removeDetachedSession(sideChatSeed.id);
+    setSideChatSeed(previewTab);
+    handles.updateDetachedSession(previewTab, (current) => current);
+  }, [
+    activeModelId,
+    activeProject,
+    focusedSession,
+    handles,
+    sessionPreviewRequest,
+    sideChatSeed.id,
+  ]);
   const closeComputerTab = useCallback(
     (closing: ComputerTab) => {
       if (closing === "side-chat") {
@@ -301,7 +314,6 @@ export function AgentBrowserPanel({
         gitSummary={gitSummary}
         models={models}
         modelsLoading={modelsLoading}
-        isElectron={isElectron}
         onCloseSideChat={closeSideChat}
         onCompactSession={handles.compactFocusedSession}
         onNavigateBrowser={navigateBrowser}
@@ -329,10 +341,7 @@ const TAB_LABELS: Record<ComputerTab, string> = {
   "side-chat": "Side chat",
   browser: "Browser",
   files: "Filesystem",
-  diff: "Git",
-  pr: "PR",
-  plan: "Plan",
-  inspector: "Inspector",
+  diff: "Review",
   terminal: "Terminal",
 };
 
@@ -349,35 +358,22 @@ const TAB_OPTIONS: Array<{
     icon: MessageSquarePlus,
   },
   {
-    tab: "plan",
-    label: "Plan",
-    description: "Plan and to-do checklist",
-    icon: ListChecks,
-  },
-  {
     tab: "browser",
     label: "Browser",
     description: "Web, localhost, and file previews",
     icon: Globe2,
   },
-  { tab: "diff", label: "Git", description: "Diffs, branch, commit, and push", icon: GitBranch },
   {
-    tab: "pr",
-    label: "PR",
-    description: "Pull request status and merge",
-    icon: GitPullRequest,
+    tab: "diff",
+    label: "Review",
+    description: "Diff, commit, push, and PR",
+    icon: GitBranch,
   },
   {
     tab: "files",
     label: "Filesystem",
     description: "Project files and rendered previews",
     icon: FolderTree,
-  },
-  {
-    tab: "inspector",
-    label: "Inspector",
-    description: "Per-turn tools, files, and context",
-    icon: ScanSearch,
   },
   { tab: "terminal", label: "Terminal", description: "Project shell", icon: TerminalSquare },
 ];

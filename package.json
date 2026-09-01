@@ -2,28 +2,19 @@
   "name": "local-studio",
   "version": "2.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.19.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
-    "doctor": "bash scripts/doctor.sh",
-    "release:notes": "node scripts/release-statement.mjs",
-    "release:check-commits": "node scripts/check-conventional-commits.mjs --range origin/main..HEAD",
-    "release:build-desktop": "node scripts/build-desktop-release.mjs",
-    "release:stage-desktop": "node scripts/stage-desktop-release.mjs",
-    "setup:git-hooks": "node scripts/setup-git-hooks.mjs",
+    "setup": "node scripts/project.mjs setup",
+    "doctor": "node scripts/project.mjs doctor",
+    "check": "node scripts/project.mjs check",
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
-    "start": "npm --prefix frontend start",
-    "test": "npm --prefix frontend test && npm --prefix services/agent-runtime test",
-    "test:e2e": "npm --prefix frontend run test:e2e",
-    "check": "npm run check:contracts && npm run check:structure && npm run check:frontend && npm run check:controller && npm run check:agent-runtime",
-    "check:contracts": "node scripts/validate-shared-contracts.mjs",
-    "check:structure": "node scripts/validate-barrel-dir-siblings.mjs",
-    "check:frontend": "npm --prefix frontend run check:quality",
-    "check:controller": "cd controller && bun run typecheck && bun run lint && bun run check && bun run test",
-    "check:agent-runtime": "cd services/agent-runtime && bun run test",
-    "test:integration": "npm --prefix services/agent-runtime test",
-    "dev:agent-runtime": "npm --prefix services/agent-runtime run build && node services/agent-runtime/dist/server.js",
-    "desktop:build": "cd frontend && npm run desktop:build",
-    "desktop:dist": "cd frontend && npm run desktop:dist",
-    "desktop:pack": "cd frontend && npm run desktop:pack"
+    "start": "npm --prefix frontend run start",
+    "desktop:build": "npm --prefix frontend run desktop:build",
+    "desktop:dist": "npm --prefix frontend run desktop:dist",
+    "desktop:pack": "npm --prefix frontend run desktop:pack"
   }
 }

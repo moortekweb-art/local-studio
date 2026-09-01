@@ -69,9 +69,13 @@ export interface ControllerDeployResultPayload {
 }
 
 export interface ControllerDeployBridge {
-  /** Deploy a controller to an ssh host; resolves with url + api key. */
+  /**
+   * Deploy a controller — onto this machine (`mode: "local"`, loopback bind)
+   * or to an ssh host; resolves with url + api key.
+   */
   start(options: {
-    host: string;
+    mode?: "ssh" | "local";
+    host?: string;
     port?: number;
     installDir?: string;
   }): Promise<ControllerDeployResultPayload>;
@@ -94,14 +98,18 @@ export interface DesktopBridge {
   getRuntime(): Promise<{
     platform: NodeJS.Platform;
     appVersion: string;
+    packaged: boolean;
+    releaseChannel: "dev" | "stable";
     chromeVersion: string;
     electronVersion: string;
   }>;
   openExternal(url: string): Promise<boolean>;
   /** Reveal a file in Finder/Explorer. Returns false when outside the home tree. */
   revealPath(target: string): Promise<boolean>;
+  /** Open a file with its default application. False when outside the home tree. */
+  openPath(target: string): Promise<boolean>;
   getUpdateStatus(): Promise<DesktopUpdateSnapshot>;
-  checkForUpdates(): Promise<DesktopUpdateSnapshot>;
+  startUpdate(): Promise<DesktopUpdateSnapshot>;
   openDirectory(): Promise<ProjectEntry | null>;
   getPathForFile(file: File): string;
   listProjects(): Promise<ProjectEntry[]>;

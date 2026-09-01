@@ -1,5 +1,6 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { AgentImageInput } from "../../../shared/agent/agent-image-input";
+import type { AgentQueueAction } from "../../../shared/agent/agent-turn";
 import type { RuntimeStartOptions } from "./pi-runtime-helpers";
 
 // Pi event surface seen by the rest of the app. Upstream consumers
@@ -24,23 +25,6 @@ export type PiPromptOptions = {
   source?: "interactive" | "rpc" | "extension";
   preflightResult?: (success: boolean) => void;
   restartOnContinuationError?: boolean;
-};
-
-export type PiDurablePromptMarker = {
-  dispatchId: string;
-  messageId: string;
-  contentHash: string;
-};
-
-export type PiDurablePromptBoundary = {
-  dispatchId: string;
-  markerEntryId: string;
-  userEntryId: string;
-  piSessionId: string;
-  sessionFile: string;
-  cwd: string;
-  modelId: string;
-  acceptedAt: string;
 };
 
 // Re-exported from the canonical Effect-schema-derived type in runtime-schema.ts
@@ -71,13 +55,13 @@ export interface PiAgentSession {
     onEvent: (event: PiEvent, seq: number) => void,
     options?: PiPromptOptions,
   ): Promise<void>;
-  promptDurably(
-    message: string,
-    onEvent: (event: PiEvent, seq: number) => void,
-    marker: PiDurablePromptMarker,
-    options?: PiPromptOptions,
-  ): Promise<PiDurablePromptBoundary>;
   steer(message: string, images?: AgentImageInput[]): Promise<void>;
+  mutateQueuedFollowUp(
+    message: string,
+    action: AgentQueueAction,
+    replacement?: string,
+    images?: AgentImageInput[],
+  ): Promise<void>;
   followUp(message: string, images?: AgentImageInput[]): Promise<void>;
   /** Resolves with the messages that were still queued, so the caller can
    *  restore them rather than losing them to the stop. */

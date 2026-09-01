@@ -16,6 +16,7 @@ export {
 } from "@shared/agent/agent-turn";
 export type {
   ParseResult,
+  AgentQueueAction,
   AgentTurnMode,
   AgentStreamingBehavior,
   AgentTurnRequest,
@@ -34,6 +35,8 @@ import {
 } from "@shared/agent/agent-turn";
 
 export type GitRef = { name: string; current: boolean; remote: boolean };
+export type GitBranch = { name: string; current: boolean; remote: boolean };
+export type GitWorktree = { path: string; branch: string | null; current: boolean };
 export type GitStatusEntry = { code: string; path: string };
 
 export type GitState = {
@@ -54,9 +57,12 @@ export type GitState = {
 export type GitAction =
   | { action: "init" }
   | { action: "checkout"; ref: string }
-  | { action: "createBranch"; branch: string }
   | { action: "commit"; message: string; paths: string[] }
-  | { action: "push" };
+  | { action: "push" }
+  | { action: "switch_branch"; branch: string }
+  | { action: "create_branch"; branch: string }
+  | { action: "add_worktree"; branch: string; path: string }
+  | { action: "remove_worktree"; path: string };
 
 export function parseGitAction(input: unknown): ParseResult<GitAction> {
   const body = objectRecord(input);
@@ -69,11 +75,24 @@ export function parseGitAction(input: unknown): ParseResult<GitAction> {
     const ref = stringField(body, "ref", true);
     return ref.ok ? { ok: true, value: { action: "checkout", ref: ref.value! } } : ref;
   }
-  if (body.action === "createBranch") {
+  if (body.action === "switch_branch" || body.action === "create_branch") {
     const branch = stringField(body, "branch", true);
-    return branch.ok
-      ? { ok: true, value: { action: "createBranch", branch: branch.value! } }
-      : branch;
+    if (!branch.ok) return branch;
+    return { ok: true, value: { action: body.action, branch: branch.value! } };
+  }
+  if (body.action === "add_worktree") {
+    const branch = stringField(body, "branch", true);
+    if (!branch.ok) return branch;
+    const path = stringField(body, "path", true);
+    if (!path.ok) return path;
+    return {
+      ok: true,
+      value: { action: "add_worktree", branch: branch.value!, path: path.value! },
+    };
+  }
+  if (body.action === "remove_worktree") {
+    const path = stringField(body, "path", true);
+    return path.ok ? { ok: true, value: { action: "remove_worktree", path: path.value! } } : path;
   }
   if (body.action === "commit") {
     const message = stringField(body, "message", true);

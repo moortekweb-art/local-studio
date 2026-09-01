@@ -61,7 +61,7 @@ function MermaidBlock({ code, fence }: { code: string; fence: string }) {
   return <div ref={containerRef} className="my-3 overflow-x-auto" />;
 }
 
-function MarkdownWithMermaid({ text }: { text: string }) {
+function MarkdownWithMermaid({ text, cwd }: { text: string; cwd?: string }) {
   return (
     <>
       {splitMermaidSegments(text).map((segment, index) =>
@@ -72,7 +72,9 @@ function MarkdownWithMermaid({ text }: { text: string }) {
             fence={segment.fence}
           />
         ) : (
-          <AssistantMarkdown key={index} text={segment.text} />
+          // cwd is what lets relative images/videos in the markdown resolve
+          // through /api/agent/fs/raw; without it they collapse to bare links.
+          <AssistantMarkdown key={index} text={segment.text} cwd={cwd} />
         ),
       )}
     </>
@@ -83,11 +85,34 @@ function previewKindForPath(path: string): PreviewKind | null {
   if (/\.(html?|svg)$/i.test(path)) return "html";
   if (/\.(jsx|tsx)$/i.test(path)) return "jsx";
   if (/\.(md|mdx|markdown)$/i.test(path)) return "md";
+  if (/\.(png|jpe?g|gif|webp|avif|bmp|ico|apng)$/i.test(path)) return "image";
+  if (/\.pdf$/i.test(path)) return "pdf";
   return null;
 }
 
 export function previewKindForOpenFile(openFile: string | null): PreviewKind | null {
   return openFile ? previewKindForPath(openFile) : null;
+}
+
+/** Kinds served from the file's own bytes instead of a UTF-8 text read. */
+export function isBinaryPreviewKind(kind: PreviewKind | null): kind is "image" | "pdf" {
+  return kind === "image" || kind === "pdf";
+}
+
+export function rawFileUrl(root: string, relPath: string): string {
+  return `/api/agent/fs/raw?cwd=${encodeURIComponent(root)}&path=${encodeURIComponent(relPath)}`;
+}
+
+// Images render straight from /api/agent/fs/raw — same-origin, so the app's
+// `img-src 'self'` CSP allows them. PDFs cannot be embedded (the CSP sets
+// `object-src 'none'` and the desktop shell runs with plugins disabled), so the
+// panel hands those to the OS or a browser tab instead of framing them.
+export function ImagePreview({ name, url }: { name: string; url: string }) {
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-(--bg) p-3">
+      <img src={url} alt={name} className="max-h-full max-w-full object-contain" />
+    </div>
+  );
 }
 
 function extractJsxPreviewSource(source: string): string {
@@ -110,16 +135,34 @@ function extractJsxPreviewSource(source: string): string {
     .replace(/<\/[A-Z][\w.]*>/g, "</div>");
 }
 
-function previewDocument(content: string, kind: "html" | "jsx"): string {
+function previewDocument(content: string, kind: "html" | "jsx", fontSize: number): string {
   const body = kind === "jsx" ? extractJsxPreviewSource(content) : content;
-  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:0}body{font:14px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111;background:#fff}*{box-sizing:border-box}img,video,iframe{max-width:100%}pre,code{white-space:pre-wrap}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0;padding:0}body{font:${fontSize}px system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#111;background:#fff}*{box-sizing:border-box}img,video,iframe{max-width:100%}pre,code{white-space:pre-wrap}</style></head><body>${body}</body></html>`;
 }
 
-export function RenderedPreview({ content, kind }: { content: string; kind: PreviewKind }) {
+export function RenderedPreview({
+  content,
+  kind,
+  fontSize,
+  cwd,
+}: {
+  content: string;
+  kind: PreviewKind;
+  /** The panel's font-size stepper. Preview mode used to ignore it — the
+   *  stepper counted up and down while the rendered page never changed. */
+  fontSize?: number;
+  cwd?: string;
+}) {
+  // Binary kinds render from their own bytes via BinaryPreview, never from a
+  // text read, so they never reach the srcDoc path below.
+  if (isBinaryPreviewKind(kind)) return null;
   if (kind === "md") {
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto bg-(--bg) px-3 py-2 text-sm leading-6 text-(--fg)">
-        <MarkdownWithMermaid text={content} />
+      <div
+        className="min-h-0 flex-1 overflow-y-auto bg-(--bg) px-3 py-2 text-sm leading-6 text-(--fg)"
+        style={fontSize ? { fontSize, lineHeight: `${Math.round(fontSize * 1.6)}px` } : undefined}
+      >
+        <MarkdownWithMermaid text={content} cwd={cwd} />
       </div>
     );
   }
@@ -127,7 +170,7 @@ export function RenderedPreview({ content, kind }: { content: string; kind: Prev
     <iframe
       title="Rendered file preview"
       sandbox="allow-same-origin allow-popups allow-forms"
-      srcDoc={previewDocument(content, kind)}
+      srcDoc={previewDocument(content, kind, fontSize ?? 14)}
       className="min-h-0 flex-1 bg-white"
     />
   );
