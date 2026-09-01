@@ -7,6 +7,13 @@ local or remote controllers. Version 2.0 unifies day-to-day operation around
 Status, Workbench, Configure, and Usage instead of separate model, integration,
 and server surfaces.
 
+## Download
+
+**[Download Local Studio for macOS (Apple Silicon)](https://github.com/sybil-solutions/local-studio/releases/latest/download/Local-Studio-arm64.dmg)**
+— signed and notarized; updates itself from GitHub releases. All versions on the
+[releases page](https://github.com/sybil-solutions/local-studio/releases), or via
+[localstudio.ai](https://localstudio.ai).
+
 It is built from two modules that share one controller API:
 
 - [`controller/`](controller/README.md) — Bun/Hono backend. Owns model lifecycle
@@ -16,6 +23,18 @@ It is built from two modules that share one controller API:
 - [`frontend/`](frontend/README.md) — Next.js 16 + React 19 UI and the macOS
   Electron desktop shell. Hosts the Workbench (`/agent`), consolidated
   Configure surface, settings, usage, logs, and browser-facing API routes.
+
+## Mobile companion
+
+[KittyLitter](https://kittylitter.app) connects to Local Studio so the same
+agent sessions, streaming content, reasoning, tool calls, and tool results are
+available on iPhone, iPad, and Android. Pair from **Settings → Profile & phone →
+Connect your phone**. The QR code and copied connection JSON are private
+controller credentials; share them only with a device you trust.
+
+See the complete pairing, version, and security guide at
+[localstudio.ai/mobile](https://localstudio.ai/mobile). Mobile pairing requires
+Local Studio 2.9.0 or newer and KittyLitter 1.6.0 or newer.
 
 ## What is a controller?
 
@@ -59,7 +78,6 @@ flowchart TB
         Proxy["src/modules/proxy"]
         Studio["src/modules/studio"]
         System["src/modules/system"]
-        Audio["src/modules/audio"]
         Stores["src/stores"]
     end
 
@@ -69,50 +87,42 @@ flowchart TB
     HttpApp --> Proxy
     HttpApp --> Studio
     HttpApp --> System
-    HttpApp --> Audio
     System --> Stores
 ```
 
 ## Quick start
 
-Prerequisites: Bun 1.x (controller), Node.js 22.19+ and npm (frontend),
-Python 3.10+ on `PATH` (`uv` strongly recommended; engine installs fall back to
-pip), Git. vLLM/SGLang serving on Linux needs NVIDIA driver + CUDA; Apple
-Silicon uses the MLX backend.
+Prerequisites: Bun 1.3.14+, Node.js 22.19+, npm 10+, Python 3.10+, and Git.
+`uv` is strongly recommended; engine installs fall back to pip. vLLM/SGLang
+serving on Linux needs NVIDIA driver + CUDA; Apple Silicon uses the MLX backend.
 
-Run the preflight check first (toolchain, ports, directories, network):
+Validate the toolchain, then install every locked workspace dependency from the
+repository root:
 
 ```bash
 npm run doctor
+npm run setup
 ```
 
 Start the controller (listens on `127.0.0.1:8080`, data dir + SQLite created
 automatically, model weights in `LOCAL_STUDIO_MODELS_DIR`, default `/models`):
 
 ```bash
-cd controller && bun install && bun src/main.ts
+bun --cwd controller run dev
 ```
 
 Start the frontend in a second terminal, then open
 <http://localhost:3000/setup>:
 
 ```bash
-cd frontend && npm ci && npm run dev
+npm run dev
 ```
 
-The agent runtime bundle has its own lockfile and dependency tree — without
-this step `npm run build` fails at the bundle step with "Missing browser
-runtime package: playwright-core":
-
-```bash
-cd services/agent-runtime && bun install
-```
-
-`npm ci` runs a postinstall patch against `@earendil-works/pi-ai`. If that step
-prints a warning, agent streaming may misrender. The setup wizard walks through
-choosing a models directory, installing an engine, downloading a model,
-launching it, and benchmarking. Engine installs (vLLM/SGLang/MLX) land in
-`<data dir>/runtime/venvs/<backend>-latest`.
+`npm run setup` installs the controller, shared contracts, agent runtime, and
+frontend from their lockfiles. The setup wizard walks through choosing a models
+directory, installing an engine, downloading a model, launching it, and
+benchmarking. Engine installs (vLLM/SGLang/MLX) land below the data directory at
+`runtime/venvs/<backend>-latest`.
 
 ## Agent runtime
 
@@ -152,15 +162,24 @@ surfaced in Configure; selections persist in the controller data directory.
 
 ## Production
 
-Build the frontend, then serve it with the standalone server:
+Build the frontend, then serve the controller and standalone frontend in separate
+terminals:
 
 ```bash
-cd frontend && npm run build && npm run start
+npm run build
+bun --cwd controller run start
+npm run start
 ```
 
-`npm run start` launches the standalone server (`scripts/start-standalone.mjs`).
+`npm run start` launches the standalone server through `scripts/project.mjs`.
 Never use plain `next start` — it breaks SSE streaming. The controller runs the
 same way in production as in development: `bun src/main.ts`.
+
+Production web startup fails unless `LOCAL_STUDIO_FRONTEND_TOKEN` is set or
+`LOCAL_STUDIO_FRONTEND_ALLOW_UNAUTHENTICATED=true` explicitly acknowledges
+unauthenticated host access. Enter a configured token at `/access`; it is sent
+only in a POST body and stored in an HttpOnly cookie. Frontend access grants the
+permissions of the host user, including the agent's shell and filesystem tools.
 
 The production frontend binds only to `127.0.0.1` and defaults to port `4783`.
 `PORT` may be set to an integer from 1024 through 65535. Workspace paths are
@@ -265,44 +284,40 @@ without it. On a trusted LAN you may instead set
 Point the frontend at a remote controller with `BACKEND_URL` or
 `NEXT_PUBLIC_API_URL` (default `http://localhost:8080`).
 
-Remote deployment is handled by `scripts/deploy-remote.sh`. Configure
-`.env.local` first (see `.env.example`):
+Deploy with your normal SSH or infrastructure workflow. The repository does not
+maintain a second deployment wrapper alongside the controller installer.
+
+The controller installer registers a persistent user service automatically
+(`launchd` on macOS and `systemd --user` on Linux), so installed controllers
+return after login without a repository daemon wrapper.
+
+## Commands
+
+Five commands cover the whole repo; everything else is plumbing they call.
 
 ```bash
-REMOTE_HOST=192.168.x.x
-REMOTE_USER=username
-REMOTE_PATH=/home/user/project
-# Optional: REMOTE_SSH_KEY (defaults to ~/.ssh/id_ed25519)
+npm run setup           # toolchain check + install every workspace
+npm run dev             # frontend dev server + agent runtime, watch mode
+npm run check           # every gate CI runs, in one command
+npm run build           # production Next build + standalone repair + assertions
+npm run desktop:dist    # build and package the macOS app
 ```
 
-```bash
-./scripts/deploy-remote.sh controller   # sync + build + restart controller
-./scripts/deploy-remote.sh frontend     # sync + build + restart frontend
-./scripts/deploy-remote.sh status       # inspect remote processes
-```
-
-Local daemon helper: `./scripts/daemon.sh {start|stop|status}`. The controller installer registers a persistent user service automatically (`launchd` on macOS and `systemd --user` on Linux), so installed controllers return after login without a manual daemon command.
-
-## Validation
-
-```bash
-npm run check
-npm run test:integration
-```
-
-The configured pre-push hook (`.githooks/pre-push`) checks conventional commits
-and runs the frontend quality gate (`npm --prefix frontend run check:quality`)
-before pushing.
+All automation lives in `frontend/desktop/automation/*.mjs` — plain readable
+modules dispatched by `scripts/project.mjs` (`node scripts/project.mjs` with no
+arguments lists every subcommand). The pre-push hook checks conventional
+commits and runs the frontend quality gate before pushing; the hook filenames
+in `.githooks/` are symlinks to `scripts/project.mjs` and contain no logic of
+their own.
 
 ## Releases
 
-Every successful `main` CI run builds and boots an isolated unsigned macOS app,
-checks the embedded frontend, agent runtime, native desktop bridge, and PTY, and
-keeps the exact-SHA package as a GitHub Actions artifact. Conventional commits
+Every successful `main` CI run builds an unsigned macOS app and keeps the
+exact-SHA package as a GitHub Actions artifact. Conventional commits
 then trigger `release.yml`. Semantic Release chooses the next version (`feat` →
 minor, breaking → major, all other allowed commit types → patch).
 
-The release workflow builds the exact tested revision without Apple credentials,
+The release workflow builds the exact revision without Apple credentials,
 then passes only that unsigned app bundle to a separate signing job. The signing
 job installs the lockfile-pinned signing tooling without lifecycle scripts,
 signs, notarizes and staples the release assets, and hands them to a final
@@ -311,23 +326,26 @@ the final stage can create the GitHub release with the DMG, updater files,
 stable website alias, checksums, and source manifest. There is no npm publish
 and tags are never created by hand.
 
-To reproduce the notarized release locally with the keychain profile:
+## Acknowledgements
 
-```bash
-APPLE_KEYCHAIN_PROFILE=vllm-studio-notarize npm run release:build-desktop -- \
-  --version 2.2.2 \
-  --commit "$(git rev-parse HEAD)"
-```
+Local Studio is built with and inspired by exceptional open-source work:
 
-Remove `frontend/dist-desktop/` and `release-staging/` after installation and
-upload; neither directory belongs in git.
+- [Pi](https://github.com/earendil-works/pi) — the agent runtime and native
+  session model behind Workbench.
+- [T3 Code](https://github.com/pingdotgg/t3code) — inspiration for a focused,
+  developer-first coding workbench.
+- [SGLang](https://github.com/sgl-project/sglang) — a high-performance model
+  serving backend supported by Local Studio recipes.
+- [vLLM](https://github.com/vllm-project/vllm) — a high-throughput inference
+  and serving backend supported throughout Local Studio.
+- [Convex](https://github.com/get-convex/convex-backend) — inspiration for
+  reactive, real-time application architecture.
 
 ## Contributing
 
 Contributions should be small, focused, and easy to review. Start from the
-latest `main`, one logical change per branch, no formatting-only rewrites, no
-secrets or build artifacts. Run `npm run check` (and `npm run test:integration` for
-behavior changes) before opening a PR; include a concise summary, the validation
+latest `dev`, one logical change per branch, no formatting-only rewrites, no
+secrets or build artifacts. Run `npm run check` before opening a PR; include a concise summary, the validation
 commands you ran, and screenshots for UI changes. See AGENTS.md for the full
 code standards an agent (or contributor) must follow.
 

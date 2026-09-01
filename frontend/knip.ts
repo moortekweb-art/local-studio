@@ -5,11 +5,9 @@ const config = {
     "desktop/preload.ts",
     "desktop/app-identity.ts",
     "desktop/resources/pi-extensions/*.ts",
-    "src/**/*.test.ts",
-    "desktop/**/*.test.ts",
   ],
   project: ["src/**/*.{ts,tsx}", "desktop/**/*.{ts,tsx}"],
-  ignore: [".next/**", "node_modules/**"],
+  ignore: [".next/**", ".next-dev/**", "node_modules/**"],
   ignoreIssues: {
     "desktop/interfaces.ts": ["types"],
   },
@@ -20,10 +18,7 @@ const config = {
     "@local-studio/agent-runtime",
     "@hono/node-server",
     "@modelcontextprotocol/sdk",
-    // Declared here but imported from services/agent-runtime (browser-host).
-    // knip only sees that importer locally, through the node_modules symlink
-    // the frontend postinstall creates. CI has no symlink, so it reports the
-    // dependency as unused and fails the job — the ignore has to stay.
+    "@lydell/node-pty",
     "playwright-core",
     "chromium-bidi",
     "proper-lockfile",

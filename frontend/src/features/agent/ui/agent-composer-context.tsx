@@ -2,15 +2,16 @@
 
 import {
   AtSign,
-  Boxes,
   CircleDot,
   Download,
   FileText,
   Gauge,
   GitFork,
   Globe,
+  Plug,
   Slash,
   Sparkles,
+  Target,
   TerminalSquare,
 } from "@/ui/icon-registry";
 import type {
@@ -203,7 +204,7 @@ function MentionRowItem({
       </span>
       {source ? (
         <span
-          className="hidden truncate font-mono text-[length:var(--fs-2xs)] uppercase tracking-wide text-(--dim) sm:inline"
+          className="hidden truncate font-mono text-[length:var(--fs-sm)] text-(--dim) sm:inline"
           title={source}
         >
           {source}
@@ -227,10 +228,11 @@ const COMMAND_ICONS: Record<ComposerCommand["icon"], typeof Slash> = {
 
 // Codex leads each command row with a semantic glyph, not a uniform slash.
 const BUILTIN_COMMAND_ICONS: Record<string, typeof Slash> = {
+  goal: Target,
   compact: CircleDot,
   status: Gauge,
   browser: Globe,
-  plugins: Boxes,
+  connectors: Plug,
   terminal: TerminalSquare,
   fork: GitFork,
   export: Download,

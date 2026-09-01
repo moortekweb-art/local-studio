@@ -2,11 +2,11 @@
 import {
   useCallback,
   useMemo,
+  useRef,
   type ChangeEvent,
   type ClipboardEvent,
   type Dispatch,
   type KeyboardEvent,
-  type MutableRefObject,
   type RefObject,
   type SetStateAction,
 } from "react";
@@ -22,21 +22,26 @@ import {
   type ComposerSkillRef,
 } from "@/features/agent/composer-context";
 import type { ComposerCommand } from "@/features/agent/composer/command-types";
-import { type SessionTab } from "@/features/agent/messages";
+import type { Session } from "@/features/agent/runtime/types";
 import type { ToolsContextValue } from "@/features/agent/tools/context";
 import {
   filesFromDataTransfer,
   imageFileFromDataUrlText,
 } from "@/features/agent/ui/chat-attachments";
 import { useMountSubscription } from "@/hooks/use-mount-subscription";
+import {
+  recentComposerHistory,
+  stepComposerHistory,
+  type ComposerHistoryCursor,
+} from "@/features/agent/ui/composer-history";
 
-export type UpdateTab = (tabId: string, patch: (tab: SessionTab) => SessionTab) => void;
+export type UpdateTab = (tabId: string, patch: (tab: Session) => Session) => void;
 
 export function useComposerLoadedContext({
   activeTab,
   tools,
 }: {
-  activeTab: SessionTab | null;
+  activeTab: Session | null;
   tools: ToolsContextValue;
 }) {
   const activeSelection = tools.selectionFor(activeTab?.id);
@@ -85,28 +90,30 @@ export function useComposerMentionRows({
       // Already registry-matched against the query; just wrap for the picker.
       return commandRows.map((row) => ({ kind: "command" as const, row }));
     }
-    const q = mention.query.trim().toLowerCase();
-    const files = fileMentionRows
-      .filter(
-        (row) => !q || row.rel.toLowerCase().includes(q) || row.name.toLowerCase().includes(q),
-      )
-      .slice(0, 5)
-      .map((row) => ({ kind: "file" as const, row }));
-    return files.slice(0, 8);
+    // Already path-matched and ranked server-side against the query; keep that
+    // order and honour the same 8-row budget as the other mention kinds.
+    return fileMentionRows.slice(0, 8).map((row) => ({ kind: "file" as const, row }));
   }, [commandRows, fileMentionRows, mention, skillRows]);
 }
 
-export function useComposerTextareaHeightSync({
-  value,
+export type ComposerAutosizeHandle = {
+  reset: () => void;
+  resizeAfterCommit: (nextValue: string, nextCaret: number) => void;
+  resizeOnChange: (element: HTMLTextAreaElement, nextValue: string) => void;
+};
+
+/** Owns the composer textarea's autosize state: the last applied height and value
+ *  length let growth skip redundant style writes while shrinking re-measures. */
+export function useComposerAutosize({
   textareaRef,
-  lastAppliedComposerHeightRef,
-  lastComposerValueLengthRef,
+  value,
 }: {
-  value: string;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  lastAppliedComposerHeightRef: MutableRefObject<number>;
-  lastComposerValueLengthRef: MutableRefObject<number>;
-}) {
+  value: string;
+}): ComposerAutosizeHandle {
+  const lastAppliedHeightRef = useRef(0);
+  const lastValueLengthRef = useRef(0);
+
   useMountSubscription(() => {
     const node = textareaRef.current;
     if (!node) return;
@@ -114,54 +121,24 @@ export function useComposerTextareaHeightSync({
     if (!value) {
       node.style.height = "";
       node.scrollTop = 0;
-      lastAppliedComposerHeightRef.current = 0;
-      lastComposerValueLengthRef.current = 0;
+      lastAppliedHeightRef.current = 0;
+      lastValueLengthRef.current = 0;
       return;
     }
 
     node.style.height = "auto";
     const next = node.scrollHeight;
     node.style.height = `${next}px`;
-    lastAppliedComposerHeightRef.current = next;
-    lastComposerValueLengthRef.current = value.length;
-  }, [lastAppliedComposerHeightRef, lastComposerValueLengthRef, textareaRef, value]);
-}
+    lastAppliedHeightRef.current = next;
+    lastValueLengthRef.current = value.length;
+  }, [textareaRef, value]);
 
-export function useComposerTextareaBehavior({
-  activeTab,
-  mention,
-  mentionRows,
-  mentionIndex,
-  running,
-  textareaRef,
-  lastAppliedComposerHeightRef,
-  lastComposerValueLengthRef,
-  resetComposerHeight,
-  updateTab,
-  setMention,
-  setMentionIndex,
-  selectMentionRow,
-  queueMessage,
-  abortTurn,
-  attachFiles,
-}: {
-  activeTab: SessionTab | null;
-  mention: ComposerMention | null;
-  mentionRows: MentionRow[];
-  mentionIndex: number;
-  running: boolean;
-  textareaRef: RefObject<HTMLTextAreaElement | null>;
-  lastAppliedComposerHeightRef: MutableRefObject<number>;
-  lastComposerValueLengthRef: MutableRefObject<number>;
-  resetComposerHeight: () => void;
-  updateTab: UpdateTab;
-  setMention: Dispatch<SetStateAction<ComposerMention | null>>;
-  setMentionIndex: Dispatch<SetStateAction<number>>;
-  selectMentionRow: (entry: MentionRow) => Promise<void>;
-  queueMessage: () => Promise<void>;
-  abortTurn: () => Promise<void>;
-  attachFiles: (files: FileList | File[] | null) => Promise<void>;
-}) {
+  const reset = useCallback(() => {
+    if (textareaRef.current) textareaRef.current.style.height = "";
+    lastAppliedHeightRef.current = 0;
+    lastValueLengthRef.current = 0;
+  }, [textareaRef]);
+
   const resizeAfterCommit = useCallback(
     (nextValue: string, nextCaret: number) => {
       requestAnimationFrame(() => {
@@ -171,12 +148,70 @@ export function useComposerTextareaBehavior({
         node.style.height = "auto";
         const next = node.scrollHeight;
         node.style.height = `${next}px`;
-        lastAppliedComposerHeightRef.current = next;
-        lastComposerValueLengthRef.current = nextValue.length;
+        lastAppliedHeightRef.current = next;
+        lastValueLengthRef.current = nextValue.length;
       });
     },
-    [lastAppliedComposerHeightRef, lastComposerValueLengthRef, textareaRef],
+    [textareaRef],
   );
+
+  const resizeOnChange = useCallback(
+    (element: HTMLTextAreaElement, nextValue: string) => {
+      if (!nextValue) {
+        reset();
+        return;
+      }
+      const prevLength = lastValueLengthRef.current;
+      lastValueLengthRef.current = nextValue.length;
+      const shrinking = nextValue.length < prevLength;
+      if (shrinking) element.style.height = "auto";
+      const next = element.scrollHeight;
+      if (!shrinking && next === lastAppliedHeightRef.current) return;
+      element.style.height = `${next}px`;
+      lastAppliedHeightRef.current = next;
+    },
+    [reset],
+  );
+
+  return useMemo(
+    () => ({ reset, resizeAfterCommit, resizeOnChange }),
+    [reset, resizeAfterCommit, resizeOnChange],
+  );
+}
+
+export function useComposerTextareaBehavior({
+  activeTab,
+  mention,
+  mentionRows,
+  mentionIndex,
+  running,
+  autosize,
+  updateTab,
+  setMention,
+  setMentionIndex,
+  selectMentionRow,
+  queueMessage,
+  abortTurn,
+  attachFiles,
+}: {
+  activeTab: Session | null;
+  mention: ComposerMention | null;
+  mentionRows: MentionRow[];
+  mentionIndex: number;
+  running: boolean;
+  autosize: ComposerAutosizeHandle;
+  updateTab: UpdateTab;
+  setMention: Dispatch<SetStateAction<ComposerMention | null>>;
+  setMentionIndex: Dispatch<SetStateAction<number>>;
+  selectMentionRow: (entry: MentionRow) => Promise<void>;
+  queueMessage: () => Promise<void>;
+  abortTurn: () => Promise<void>;
+  attachFiles: (files: FileList | File[] | null) => Promise<void>;
+}) {
+  const historyNavigationRef = useRef<{
+    sessionId: string;
+    cursor: ComposerHistoryCursor;
+  }>({ sessionId: "", cursor: { index: -1, draft: "" } });
 
   const handleComposerPaste = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -200,43 +235,28 @@ export function useComposerTextareaBehavior({
         const nextCaret = start + text.length;
         updateTab(activeTab.id, (tab) => ({ ...tab, input: nextValue }));
         setMention(null);
-        resizeAfterCommit(nextValue, nextCaret);
+        autosize.resizeAfterCommit(nextValue, nextCaret);
         return;
       }
       event.preventDefault();
       void attachFiles(files);
     },
-    [activeTab, attachFiles, resizeAfterCommit, setMention, updateTab],
+    [activeTab, attachFiles, autosize, setMention, updateTab],
   );
 
   const handleComposerChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
       const value = event.target.value;
       if (!activeTab) return;
+      historyNavigationRef.current = {
+        sessionId: activeTab.id,
+        cursor: { index: -1, draft: value },
+      };
       updateTab(activeTab.id, (tab) => ({ ...tab, input: value }));
       setMention(value ? detectComposerMention(value, event.currentTarget.selectionStart) : null);
-      const element = event.currentTarget;
-      if (!value) {
-        resetComposerHeight();
-        return;
-      }
-      const prevLength = lastComposerValueLengthRef.current;
-      lastComposerValueLengthRef.current = value.length;
-      const shrinking = value.length < prevLength;
-      if (shrinking) element.style.height = "auto";
-      const next = element.scrollHeight;
-      if (!shrinking && next === lastAppliedComposerHeightRef.current) return;
-      element.style.height = `${next}px`;
-      lastAppliedComposerHeightRef.current = next;
+      autosize.resizeOnChange(event.currentTarget, value);
     },
-    [
-      activeTab,
-      lastAppliedComposerHeightRef,
-      lastComposerValueLengthRef,
-      resetComposerHeight,
-      setMention,
-      updateTab,
-    ],
+    [activeTab, autosize, setMention, updateTab],
   );
 
   /** Arrow/Escape/accept keys while the @-mention or /-command popup is open.
@@ -267,13 +287,54 @@ export function useComposerTextareaBehavior({
     [mentionIndex, mentionRows, selectMentionRow, setMention, setMentionIndex],
   );
 
+  const handleComposerHistoryKey = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+      if (
+        !activeTab ||
+        (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.nativeEvent.isComposing
+      ) {
+        return false;
+      }
+      const history = recentComposerHistory(activeTab.messages);
+      const stored = historyNavigationRef.current;
+      const expectedValue =
+        stored.sessionId === activeTab.id && stored.cursor.index >= 0
+          ? history[stored.cursor.index]
+          : stored.cursor.draft;
+      const cursor =
+        stored.sessionId === activeTab.id && expectedValue === activeTab.input
+          ? stored.cursor
+          : { index: -1, draft: activeTab.input };
+      if (cursor.index < 0 && activeTab.input.length > 0) return false;
+      const step = stepComposerHistory(
+        activeTab.messages,
+        cursor,
+        event.key === "ArrowUp" ? "older" : "newer",
+      );
+      if (!step) return false;
+      event.preventDefault();
+      historyNavigationRef.current = { sessionId: activeTab.id, cursor: step.cursor };
+      updateTab(activeTab.id, (tab) => ({ ...tab, input: step.value }));
+      setMention(null);
+      autosize.resizeAfterCommit(step.value, step.value.length);
+      return true;
+    },
+    [activeTab, autosize, setMention, updateTab],
+  );
+
   const handleComposerKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (mention && handleMentionKey(event)) return;
+      if (handleComposerHistoryKey(event)) return;
       // While a turn is running, Enter QUEUES rather than steers. Steering
-      // interrupts the agent's plan mid-flight, so it stays a deliberate act
-      // (the composer's ↑ button, or promoting an item in the queue stack).
-      // Alt+Enter keeps the one-key steer for anyone who wants it.
+      // interrupts the agent's plan mid-flight, so it stays a deliberate act —
+      // the drawer's "Interrupt now" button, promoting an item in the queue
+      // stack, or Alt+Enter. Tab used to queue too; it is back to moving focus,
+      // since the drawer now offers both choices as buttons.
       if (event.key === "Enter" && !event.shiftKey) {
         if (running && !event.altKey && activeTab?.input.trim()) {
           event.preventDefault();
@@ -284,12 +345,6 @@ export function useComposerTextareaBehavior({
         event.currentTarget.form?.requestSubmit();
         return;
       }
-      if (event.key === "Tab" && !event.shiftKey) {
-        if (!activeTab?.input.trim()) return;
-        event.preventDefault();
-        void queueMessage();
-        return;
-      }
       if (event.key === "Escape" || (event.key === "." && (event.metaKey || event.ctrlKey))) {
         if (running) {
           event.preventDefault();
@@ -297,7 +352,15 @@ export function useComposerTextareaBehavior({
         }
       }
     },
-    [abortTurn, activeTab, handleMentionKey, mention, queueMessage, running],
+    [
+      abortTurn,
+      activeTab,
+      handleComposerHistoryKey,
+      handleMentionKey,
+      mention,
+      queueMessage,
+      running,
+    ],
   );
 
   return {

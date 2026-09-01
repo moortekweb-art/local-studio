@@ -7,6 +7,7 @@ import {
 import {
   DEFAULT_FONT_FAMILY_ID,
   DEFAULT_FONT_SIZE_ID,
+  THEME_BY_ID,
   type FontFamilyId,
   type FontSizeId,
   type ThemeId,
@@ -17,48 +18,51 @@ import {
   applyStoredUiControls,
   applyThemeToDocument,
 } from "@/lib/theme-runtime";
+import type { PreviewHeight } from "@/ui/preview-scroll";
+import type {
+  ToolKind,
+  ToolPreviewHeightOverrides,
+} from "@/features/agent/ui/timeline/tool-metadata";
 
 // --- App slice ---
 
-export interface SidebarState {
-  collapsed: boolean;
-  mobileOpen: boolean;
-}
-
 export interface AppSlice {
-  sidebar: SidebarState;
-  setSidebarCollapsed: (collapsed: boolean) => void;
-  toggleSidebarCollapsed: () => void;
-  setSidebarMobileOpen: (open: boolean) => void;
-  toggleSidebarMobileOpen: () => void;
   sidebarWidth: number;
   setSidebarWidth: (width: number) => void;
   fileViewerFontSize: number;
   setFileViewerFontSize: (size: number) => void;
+  toolPreviewHeight: PreviewHeight;
+  setToolPreviewHeight: (height: PreviewHeight) => void;
+  toolPreviewHeightOverrides: ToolPreviewHeightOverrides;
+  setToolPreviewHeightOverride: (kind: ToolKind, height: PreviewHeight | undefined) => void;
   lastOpenFileByProject: Record<string, string>;
   setLastOpenFileByProject: (cwd: string, rel: string) => void;
 }
 
+export const DEFAULT_SIDEBAR_WIDTH = 275;
+
+const LEGACY_DEFAULT_SIDEBAR_WIDTHS = new Set([204, 220, 224, 240, 260, 275]);
+
+function restoredSidebarWidth(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return LEGACY_DEFAULT_SIDEBAR_WIDTHS.has(value) ? DEFAULT_SIDEBAR_WIDTH : value;
+}
+
 const createAppSlice: StateCreator<AppSlice, [], [], AppSlice> = (set) => ({
-  sidebar: { collapsed: false, mobileOpen: false },
-  setSidebarCollapsed: (collapsed) =>
-    set((state) => {
-      if (state.sidebar.collapsed === collapsed) return state;
-      return { sidebar: { ...state.sidebar, collapsed } };
-    }),
-  toggleSidebarCollapsed: () =>
-    set((state) => ({ sidebar: { ...state.sidebar, collapsed: !state.sidebar.collapsed } })),
-  setSidebarMobileOpen: (mobileOpen) =>
-    set((state) => {
-      if (state.sidebar.mobileOpen === mobileOpen) return state;
-      return { sidebar: { ...state.sidebar, mobileOpen } };
-    }),
-  toggleSidebarMobileOpen: () =>
-    set((state) => ({ sidebar: { ...state.sidebar, mobileOpen: !state.sidebar.mobileOpen } })),
-  sidebarWidth: 275,
+  sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
   fileViewerFontSize: 12,
   setFileViewerFontSize: (fileViewerFontSize) => set({ fileViewerFontSize }),
+  toolPreviewHeight: "md",
+  setToolPreviewHeight: (toolPreviewHeight) => set({ toolPreviewHeight }),
+  toolPreviewHeightOverrides: {},
+  setToolPreviewHeightOverride: (kind, height) =>
+    set((state) => {
+      const toolPreviewHeightOverrides = { ...state.toolPreviewHeightOverrides };
+      if (height) toolPreviewHeightOverrides[kind] = height;
+      else delete toolPreviewHeightOverrides[kind];
+      return { toolPreviewHeightOverrides };
+    }),
   lastOpenFileByProject: {},
   setLastOpenFileByProject: (cwd, rel) =>
     set((state) => ({
@@ -83,7 +87,14 @@ const createThemeSlice: StateCreator<ThemeSlice, [], [], ThemeSlice> = (set) => 
   fontSizeId: DEFAULT_FONT_SIZE_ID,
   setThemeId: (themeId: ThemeId) => {
     const appliedThemeId = applyThemeToDocument(themeId);
-    set({ themeId: appliedThemeId });
+    const preferredFontFamilyId = THEME_BY_ID.get(appliedThemeId)?.fontFamilyId;
+    const appliedFontFamilyId = preferredFontFamilyId
+      ? applyFontFamilyToDocument(preferredFontFamilyId)
+      : undefined;
+    set({
+      themeId: appliedThemeId,
+      ...(appliedFontFamilyId ? { fontFamilyId: appliedFontFamilyId } : {}),
+    });
   },
   setFontFamilyId: (fontFamilyId: FontFamilyId) => {
     const appliedFontFamilyId = applyFontFamilyToDocument(fontFamilyId);
@@ -116,9 +127,21 @@ const createAppStoreImpl: StateCreator<AppStore, [], [], AppStore> = (set, ...ar
   setMobileNavOpen: (mobileNavOpen) => set({ mobileNavOpen }),
 });
 
-const storage = createJSONStorage(() =>
+let appStorePersistenceReady = false;
+
+const baseStorage = createJSONStorage(() =>
   typeof window !== "undefined" ? localStorage : (undefined as unknown as Storage),
 );
+
+const storage = baseStorage
+  ? {
+      ...baseStorage,
+      setItem: (...args: Parameters<typeof baseStorage.setItem>) =>
+        appStorePersistenceReady ? baseStorage.setItem(...args) : undefined,
+      removeItem: (...args: Parameters<typeof baseStorage.removeItem>) =>
+        appStorePersistenceReady ? baseStorage.removeItem(...args) : undefined,
+    }
+  : undefined;
 
 export const useAppStore = create<AppStore>()(
   devtools(
@@ -131,9 +154,10 @@ export const useAppStore = create<AppStore>()(
         fontFamilyId: state.fontFamilyId,
         fontSizeId: state.fontSizeId,
         desktopSidebarPinnedOpen: state.desktopSidebarPinnedOpen,
-        sidebarCollapsed: state.sidebar.collapsed,
         sidebarWidth: state.sidebarWidth,
         fileViewerFontSize: state.fileViewerFontSize,
+        toolPreviewHeight: state.toolPreviewHeight,
+        toolPreviewHeightOverrides: state.toolPreviewHeightOverrides,
         lastOpenFileByProject: state.lastOpenFileByProject,
       }),
       merge: (persisted, current) => {
@@ -142,17 +166,7 @@ export const useAppStore = create<AppStore>()(
         return {
           ...current,
           ...persistedStore,
-          sidebarWidth:
-            persistedRecord.sidebarWidth === 240 ||
-            persistedRecord.sidebarWidth === 220 ||
-            persistedRecord.sidebarWidth === 224 ||
-            persistedRecord.sidebarWidth === 204
-              ? 275
-              : (persistedStore.sidebarWidth ?? current.sidebarWidth),
-          sidebar: {
-            ...current.sidebar,
-            collapsed: persistedRecord.sidebarCollapsed === true,
-          },
+          sidebarWidth: restoredSidebarWidth(persistedRecord.sidebarWidth, current.sidebarWidth),
         };
       },
       onRehydrateStorage: () => (state) => {
@@ -168,33 +182,13 @@ export const useAppStore = create<AppStore>()(
 
 if (typeof window !== "undefined") {
   void (async () => {
-    await hydrateDurableUiPreferences();
-    await useAppStore.persist.rehydrate();
-    scheduleDurableUiPreferencesSave();
-    useAppStore.subscribe(() => scheduleDurableUiPreferencesSave());
+    try {
+      await hydrateDurableUiPreferences();
+      await useAppStore.persist.rehydrate();
+    } finally {
+      appStorePersistenceReady = true;
+      scheduleDurableUiPreferencesSave();
+      useAppStore.subscribe(() => scheduleDurableUiPreferencesSave());
+    }
   })();
-}
-
-let appStoreListenersInitialized = false;
-
-export function initAppStoreListeners() {
-  if (appStoreListenersInitialized || typeof window === "undefined") return;
-  appStoreListenersInitialized = true;
-
-  const onResize = () => {
-    if (window.innerWidth < 768 && !useAppStore.getState().sidebar.collapsed) {
-      useAppStore.getState().setSidebarCollapsed(true);
-    }
-  };
-  window.addEventListener("resize", onResize);
-  onResize();
-
-  window.addEventListener("vllm:toggle-sidebar", ((event: CustomEvent<{ open?: boolean }>) => {
-    const requested = event?.detail?.open;
-    if (typeof requested === "boolean") {
-      useAppStore.getState().setSidebarMobileOpen(requested);
-    } else {
-      useAppStore.getState().toggleSidebarMobileOpen();
-    }
-  }) as EventListener);
 }

@@ -99,6 +99,14 @@ export function ScreencastSurface({ url, onState, onUnavailable, visible = true 
           onUnavailableRef.current(payload?.error || "Browser unavailable");
           return; // stop polling; pane switches to reading mode
         }
+        // 502 = the frontend could not reach the agent runtime at all. Only
+        // 503 used to be handled, so a dead runtime left the pane saying
+        // "Connecting to browser…" forever with no error.
+        if (response.status === 502) {
+          const payload = (await response.json().catch(() => null)) as FramePayload | null;
+          onUnavailableRef.current(payload?.error || "Agent runtime unreachable");
+          return;
+        }
         const payload = (await response.json()) as FramePayload;
         if (!disposed && payload.ok && payload.data) {
           if (payload.data.frame) setFrameSrc(`data:image/jpeg;base64,${payload.data.frame}`);
@@ -230,22 +238,9 @@ export function ScreencastSurface({ url, onState, onUnavailable, visible = true 
   };
 
   const handleKey = (type: "down" | "up") => (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Leave app-level shortcuts (⌘K etc.) alone; forward everything else.
     if (event.metaKey) return;
     event.preventDefault();
     postBrowser("input", { kind: "key", type, key: event.key, code: event.code });
-    if (type === "down" && event.key.length === 1 && !event.ctrlKey && !event.altKey) {
-      postBrowser("input", {
-        kind: "key",
-        type: "char",
-        key: event.key,
-        code: event.code,
-        text: event.key,
-      });
-    }
-    if (type === "down" && event.key === "Enter") {
-      postBrowser("input", { kind: "key", type: "char", key: "Enter", code: "Enter", text: "\r" });
-    }
   };
 
   return (

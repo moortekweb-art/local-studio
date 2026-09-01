@@ -1,14 +1,18 @@
 import { useCallback, useMemo, useRef } from "react";
 import { Effect } from "effect";
 import {
+  asRecord,
   finalizeRunningToolBlocks,
-  mergeCanonicalAndRuntimeEvents,
-  reconcileReplayMessages,
   replayCursorAfterRuntimeHydration,
-  runtimeStatusAcceptsControl,
+  type ChatMessage,
+  type RuntimeLoggedEvent,
 } from "@/features/agent/messages";
 import { foldSessionEvents } from "@/features/agent/runtime/pi-event-applier";
-import { settleTurnFinalizingTools } from "@/features/agent/runtime/session-status";
+import {
+  runtimeCanHydrateCanonicalSession,
+  runtimeStatusAcceptsControl,
+  settleTurnFinalizingTools,
+} from "@/features/agent/runtime/session-status";
 import {
   selectedContextPrompt,
   type ComposerPromptTemplateRef,
@@ -16,13 +20,13 @@ import {
 } from "@/features/agent/composer-context";
 import type { Session, SessionId, UpdateSession } from "@/features/agent/runtime/types";
 import type { BrowserBackend, ToolSelection } from "@/features/agent/tools/types";
-import type { AgentThinkingLevel, AgentToolAccess } from "@/features/agent/contracts";
+import type {
+  AgentQueueAction,
+  AgentThinkingLevel,
+  AgentToolAccess,
+} from "@/features/agent/contracts";
 import * as api from "@/features/agent/runtime/api";
-import {
-  runtimeCanHydrateCanonicalSession,
-  submitPromptTurn,
-  type SubmitArgs,
-} from "@/features/agent/runtime/prompt-stream";
+import { submitPromptTurn, type SubmitArgs } from "@/features/agent/runtime/prompt-stream";
 import { readTranscriptSnapshot } from "@/features/agent/workspace/transcript-cache";
 
 import { sessionRuntimeController } from "@/features/agent/runtime/session-runtime-controller";
@@ -52,18 +56,12 @@ export type SessionEngine = {
   /** Send a freshly-typed prompt — orchestrates optimistic update + streaming. */
   submitPrompt: (args: SubmitArgs) => Promise<void>;
   /** Send a steer/follow-up control message while a turn is in progress. */
-  sendControl: (
-    mode: "steer" | "follow_up",
-    text: string,
-    runtime: string,
-    sessionId: SessionId,
-    piSessionId?: string | null,
-  ) => Promise<{ ok: boolean; error?: string }>;
+  sendControl: (request: AgentControlRequest) => Promise<{ ok: boolean; error?: string }>;
   loadRuntimeStatus: (
     runtime: string,
     piSessionId?: string | null,
   ) => Promise<api.RuntimeStatus | null>;
-  abortTurn: (sessionId: SessionId) => Promise<void>;
+  abortTurn: (sessionId: SessionId) => Promise<api.AbortSessionResult>;
   loadAndReplay: (piSessionId: string, sessionId: SessionId) => Promise<void>;
   /** Fetch and prepend the previous page of older history (tail paging). */
   loadEarlier: (sessionId: SessionId) => Promise<void>;
@@ -76,6 +74,16 @@ export type SessionEngine = {
     tab: { status: Session["status"]; piSessionId?: string | null },
     runtime: string,
   ) => Promise<boolean>;
+};
+
+export type AgentControlRequest = {
+  mode: "steer" | "follow_up";
+  text: string;
+  runtime: string;
+  sessionId: SessionId;
+  piSessionId?: string | null;
+  queueAction?: AgentQueueAction;
+  queueReplacement?: string;
 };
 
 export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
@@ -104,13 +112,9 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
   const loadRuntimeStatusCb = useCallback(api.loadRuntimeStatus, []);
 
   const sendControl = useCallback(
-    (
-      mode: "steer" | "follow_up",
-      text: string,
-      runtime: string,
-      sessionId: SessionId,
-      piSessionId?: string | null,
-    ): Promise<{ ok: boolean; error?: string }> => {
+    (request: AgentControlRequest): Promise<{ ok: boolean; error?: string }> => {
+      const { mode, text, runtime, sessionId, piSessionId, queueAction, queueReplacement } =
+        request;
       if (!text.trim() || !modelId) return Promise.resolve({ ok: false });
       return Effect.runPromise(
         Effect.gen(function* () {
@@ -119,6 +123,9 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           const promptTemplates = selection.promptTemplates ?? EMPTY_PROMPT_TEMPLATES;
           const browserEnabledForTurn = browserToolEnabled;
           const message = selectedContextPrompt(text, skills);
+          const contextualQueueReplacement = queueReplacement
+            ? selectedContextPrompt(queueReplacement, skills)
+            : undefined;
           const result = yield* Effect.tryPromise({
             try: () =>
               api.submitTurnCommand({
@@ -130,6 +137,8 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
                 cwd: cwd.trim() || undefined,
                 piSessionId,
                 mode,
+                queueAction,
+                queueReplacement: contextualQueueReplacement,
                 browserToolEnabled: browserEnabledForTurn,
                 browserSessionId: runtime,
                 browserBackend,
@@ -144,6 +153,15 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
             contextUsage: api.runtimeContextUsage(result.status, session.contextUsage),
             status: "running",
           }));
+          // Same acceptance bookkeeping the prompt path does. Without it a
+          // steer/follow-up got no accept-grace (so a stale runtime-list
+          // snapshot could idle the session and tear down its stream
+          // mid-turn) and no cursor rewind if the runtime's seq had restarted.
+          sessionRuntimeController().noteTurnAccepted(
+            sessionId,
+            undefined,
+            result.status?.eventSeq,
+          );
           if (result.piSessionId) onPiSessionIdChange?.(result.piSessionId);
           return { ok: true };
         }).pipe(
@@ -208,7 +226,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           // and /abort has no piSessionId fallback lookup.
           const runtime = sessionRuntimeController().connectionKey(sessionId);
           updateSession(sessionId, (session) => ({ ...session, status: "stopping" }));
-          yield* Effect.tryPromise({
+          const cleared = yield* Effect.tryPromise({
             try: () => api.abortSession(runtime),
             catch: (error) => error,
           });
@@ -220,6 +238,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           // last streamed text is committed before we finalize.
           sessionRuntimeController().flush(sessionId);
           updateSession(sessionId, settleTurnFinalizingTools);
+          return cleared;
         }),
       ),
     [updateSession],
@@ -306,6 +325,9 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
               // A non-null cursor means the tail load left older history unread;
               // the timeline shows a "Load earlier" affordance while it is set.
               historyCursor: messages.length > 0 ? cursor : (session.historyCursor ?? null),
+              // The replay has landed, so whatever came from the snapshot has
+              // been superseded and must not keep asking to be replayed.
+              hydratedFromCache: false,
               error: "",
             }));
             // Reattach the live stream from the hydrated cursor so EventSource
@@ -431,15 +453,7 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
           ),
         ),
       ),
-    [
-      browserToolEnabled,
-      browserBackend,
-      cwd,
-      loadAndReplay,
-      modelId,
-      thinkingLevel,
-      updateSession,
-    ],
+    [browserToolEnabled, browserBackend, cwd, loadAndReplay, modelId, thinkingLevel, updateSession],
   );
 
   const acceptsControl = useCallback(
@@ -480,4 +494,92 @@ export function useSessionEngine(deps: UseSessionEngineDeps): SessionEngine {
       acceptsControl,
     ],
   );
+}
+
+function eventKey(event: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(event);
+  } catch {
+    return `${String(event.type ?? "event")}:${Object.keys(event).join(",")}`;
+  }
+}
+
+function messageFingerprint(event: Record<string, unknown>): string | null {
+  const message = asRecord(event.message);
+  if (!message || typeof message.role !== "string") return null;
+  return eventKey(message);
+}
+
+function canonicalEventsBeforeRuntimeTail(
+  canonicalEvents: Record<string, unknown>[],
+  runtime: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const canonicalMessages = canonicalEvents.flatMap((event, eventIndex) => {
+    const fingerprint = messageFingerprint(event);
+    return fingerprint ? [{ eventIndex, fingerprint }] : [];
+  });
+  const runtimeMessages = runtime.flatMap((event) => {
+    if (event.type !== "message" && event.type !== "message_end") return [];
+    const fingerprint = messageFingerprint(event);
+    return fingerprint ? [fingerprint] : [];
+  });
+  const firstRuntimeMessage = runtimeMessages[0];
+  if (!firstRuntimeMessage) return canonicalEvents;
+  let best: { eventIndex: number; score: number } | null = null;
+  for (let index = 0; index < canonicalMessages.length; index += 1) {
+    if (canonicalMessages[index]?.fingerprint !== firstRuntimeMessage) continue;
+    let score = 0;
+    while (
+      canonicalMessages[index + score]?.fingerprint === runtimeMessages[score] &&
+      runtimeMessages[score]
+    ) {
+      score += 1;
+    }
+    const candidate = { eventIndex: canonicalMessages[index]?.eventIndex ?? 0, score };
+    if (!best || candidate.score >= best.score) best = candidate;
+  }
+  if (best) {
+    return canonicalEvents.slice(0, best.eventIndex);
+  }
+  return canonicalEvents;
+}
+
+function runtimeEventsInOrder(
+  runtimeEvents: readonly RuntimeLoggedEvent[],
+): Record<string, unknown>[] {
+  return [...runtimeEvents]
+    .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+    .flatMap((entry) => {
+      if (entry.event && typeof entry.event === "object") {
+        return [entry.event];
+      }
+      return [];
+    });
+}
+
+function dedupeAdjacentEvents(events: Record<string, unknown>[]): Record<string, unknown>[] {
+  let previous = "";
+  return events.filter((event) => {
+    const key = eventKey(event);
+    if (key === previous) return false;
+    previous = key;
+    return true;
+  });
+}
+
+function mergeCanonicalAndRuntimeEvents(
+  canonicalEvents: Record<string, unknown>[],
+  runtimeEvents: readonly RuntimeLoggedEvent[] = [],
+): Record<string, unknown>[] {
+  const runtime = runtimeEventsInOrder(runtimeEvents);
+  return dedupeAdjacentEvents([
+    ...canonicalEventsBeforeRuntimeTail(canonicalEvents, runtime),
+    ...runtime,
+  ]);
+}
+
+function reconcileReplayMessages(current: ChatMessage[], canonical: ChatMessage[]): ChatMessage[] {
+  if (canonical.length === 0) return current;
+  if (canonical.length >= current.length) return canonical;
+  return current;
 }

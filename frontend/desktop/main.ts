@@ -1,4 +1,4 @@
-import "./app-identity";
+import { isDevChannelBuild } from "./app-identity";
 import {
   app,
   clipboard,
@@ -15,10 +15,15 @@ import { DESKTOP_CONFIG } from "./configs";
 import { writeJsonAtomic } from "./helpers/fs-json";
 import { log } from "./helpers/logger";
 import { isHttpUrl } from "./helpers/url";
+import { installApplicationMenu } from "./logic/app-menu";
 import { createMainWindow } from "./logic/window-manager";
 import { registerNavigationPolicy } from "./logic/security";
 import { startFrontendServer, stopFrontendServer, type ServerHandle } from "./logic/app-server";
-import { checkForUpdates, getUpdateState, initializeAutoUpdates } from "./logic/update-manager";
+import {
+  resolveFrontendRestartUrl,
+  shouldReloadAfterFrontendRestart,
+} from "./logic/frontend-restart";
+import { getUpdateState, initializeAutoUpdates, startUpdate } from "./logic/update-manager";
 import { addProject, listProjectsWithMeta, removeProject } from "./logic/projects-store";
 import { deployController } from "./logic/controller-deploy";
 import {
@@ -106,6 +111,11 @@ function stopFrontendHealthMonitor(): void {
   frontendHealthFailures = 0;
 }
 
+function currentRendererUrl(): string | undefined {
+  if (!mainWindow || mainWindow.isDestroyed()) return undefined;
+  return mainWindow.webContents.getURL() || undefined;
+}
+
 function startFrontendHealthMonitor(): void {
   stopFrontendHealthMonitor();
   frontendHealthTimer = setInterval(() => {
@@ -137,6 +147,7 @@ async function checkFrontendHealth(): Promise<void> {
 
   if (frontendHealthFailures < HEALTH_FAILURE_THRESHOLD || !frontendServer) return;
   const stalledServer = frontendServer;
+  const rendererUrl = currentRendererUrl();
   frontendHealthFailures = 0;
   log.error(`Embedded frontend health check failed; restarting ${stalledServer.runtime.url}`);
   const pid = stalledServer.process?.pid;
@@ -144,9 +155,9 @@ async function checkFrontendHealth(): Promise<void> {
     expectedFrontendStopPids.add(pid);
     setTimeout(() => expectedFrontendStopPids.delete(pid), 30_000);
   }
-  await stopFrontendServer(stalledServer);
+  await stopFrontendServer(stalledServer, { stopAgentRuntime: false });
   if (frontendServer === stalledServer) frontendServer = undefined;
-  await restartFrontendServer(stalledServer.runtime.port);
+  await restartFrontendServer(stalledServer.runtime.port, stalledServer.agentRuntime, rendererUrl);
 }
 
 function handleFrontendServerExit(details: {
@@ -158,15 +169,24 @@ function handleFrontendServerExit(details: {
   if (details.pid && expectedFrontendStopPids.delete(details.pid)) return;
   if (frontendServer?.process && frontendServer.process.pid !== details.pid) return;
 
-  const previousRuntime = frontendServer?.runtime;
+  const previousServer = frontendServer;
+  const rendererUrl = currentRendererUrl();
   frontendServer = undefined;
   log.error(
     `Embedded frontend stopped unexpectedly code=${details.code ?? "null"} signal=${details.signal ?? "null"}`,
   );
-  void restartFrontendServer(previousRuntime?.port);
+  void restartFrontendServer(
+    previousServer?.runtime.port,
+    previousServer?.agentRuntime,
+    rendererUrl,
+  );
 }
 
-async function restartFrontendServer(port?: number): Promise<void> {
+async function restartFrontendServer(
+  port?: number,
+  agentRuntime?: ServerHandle["agentRuntime"],
+  rendererUrl?: string,
+): Promise<void> {
   if (restartingFrontend || appState === "stopping") return;
   restartingFrontend = true;
   appState = "starting";
@@ -183,7 +203,11 @@ async function restartFrontendServer(port?: number): Promise<void> {
       await delay(backoffMs);
       if (isAppStopping()) return;
     }
-    const started = await startFrontendServer({ port, onExit: handleFrontendServerExit });
+    const started = await startFrontendServer({
+      agentRuntime,
+      port,
+      onExit: handleFrontendServerExit,
+    });
     // Shutdown may have begun during the fork. If so, shutdown() already cleared
     // the health monitor and no-op'd the (mid-restart undefined) server stop —
     // so tear this just-started server down instead of re-arming the monitor and
@@ -196,7 +220,10 @@ async function restartFrontendServer(port?: number): Promise<void> {
     startFrontendHealthMonitor();
     const nextUrl = frontendServer.runtime.url;
     if (mainWindow && !mainWindow.isDestroyed()) {
-      await mainWindow.loadURL(nextUrl);
+      const liveUrl = mainWindow.webContents.getURL() || rendererUrl;
+      if (shouldReloadAfterFrontendRestart(nextUrl, liveUrl)) {
+        await mainWindow.loadURL(resolveFrontendRestartUrl(nextUrl, rendererUrl));
+      }
     } else {
       mainWindow = createMainWindow(nextUrl);
       mainWindow.on("closed", () => {
@@ -214,10 +241,43 @@ async function restartFrontendServer(port?: number): Promise<void> {
   }
 }
 
+// Resolve a renderer-supplied file reference to a real path inside the user's
+// home tree, or null. Assistant output cites files the way people write them —
+// repo-relative, "services/agent-runtime/src/foo.ts". Passing that straight to
+// realpath resolves it against the MAIN PROCESS cwd, which is the app bundle,
+// so it throws; try it as given, then against each known project root.
+function resolveHomeConfinedPath(target: unknown): string | null {
+  if (typeof target !== "string" || !target.trim()) return null;
+  const raw = target.trim();
+  const candidates = [raw];
+  if (!path.isAbsolute(raw) && !raw.startsWith("~")) {
+    for (const project of listProjectsWithMeta()) {
+      if (project.path) candidates.push(path.join(project.path, raw));
+    }
+  }
+  const home = realpathSync.native(app.getPath("home"));
+  for (const candidate of candidates) {
+    let resolved: string;
+    try {
+      resolved = realpathSync.native(candidate);
+    } catch {
+      continue;
+    }
+    // Confined to the user's home tree, so a crafted markdown link cannot point
+    // the renderer at /etc or a mounted disk.
+    const relative = path.relative(home, resolved);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+    return resolved;
+  }
+  return null;
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle("desktop:get-runtime", async () => ({
     platform: process.platform,
     appVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    releaseChannel: isDevChannelBuild ? "dev" : "stable",
     chromeVersion: process.versions.chrome,
     electronVersion: process.versions.electron,
   }));
@@ -232,41 +292,23 @@ function registerIpcHandlers(): void {
   // the user's home tree (the same default as the runtime's WORKSPACE_ROOTS) so
   // a crafted markdown link cannot point the renderer at /etc or a mounted disk.
   ipcMain.handle("desktop:reveal-path", async (_, target: unknown) => {
-    if (typeof target !== "string" || !target.trim()) return false;
-    const raw = target.trim();
+    const resolved = resolveHomeConfinedPath(target);
+    if (!resolved) return false;
+    shell.showItemInFolder(resolved);
+    return true;
+  });
 
-    // Assistant output cites files the way people write them — repo-relative,
-    // "services/agent-runtime/src/foo.ts". Passing that straight to realpath
-    // resolves it against the MAIN PROCESS cwd, which is the app bundle, so it
-    // threw and the renderer silently fell back to opening the path in the
-    // in-app browser. Try it as given, then against each known project root.
-    const candidates = [raw];
-    if (!path.isAbsolute(raw) && !raw.startsWith("~")) {
-      for (const project of listProjectsWithMeta()) {
-        if (project.path) candidates.push(path.join(project.path, raw));
-      }
-    }
-
-    const home = realpathSync.native(app.getPath("home"));
-    for (const candidate of candidates) {
-      let resolved: string;
-      try {
-        resolved = realpathSync.native(candidate);
-      } catch {
-        continue;
-      }
-      // Still confined to the user's home tree, so a crafted markdown link
-      // cannot point the renderer at /etc or a mounted disk.
-      const relative = path.relative(home, resolved);
-      if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
-      shell.showItemInFolder(resolved);
-      return true;
-    }
-    return false;
+  // Hand a file to its default application — the only way to view formats the
+  // Files panel cannot render (PDFs, archives, media). Same home confinement.
+  ipcMain.handle("desktop:open-path", async (_, target: unknown) => {
+    const resolved = resolveHomeConfinedPath(target);
+    if (!resolved) return false;
+    const error = await shell.openPath(resolved);
+    return error === "";
   });
 
   ipcMain.handle("desktop:get-update-status", async () => getUpdateState());
-  ipcMain.handle("desktop:check-for-updates", async () => checkForUpdates(true));
+  ipcMain.handle("desktop:start-update", async () => startUpdate());
   ipcMain.handle("desktop:get-kittylitter-pairing-json", async () => getKittylitterPairingJson());
   ipcMain.handle("desktop:copy-kittylitter-pairing-json", async (_, pairingJson: unknown) => {
     try {
@@ -575,6 +617,7 @@ async function run(): Promise<void> {
 
   await app.whenReady();
 
+  installApplicationMenu();
   initializeAutoUpdates();
 
   try {

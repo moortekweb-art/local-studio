@@ -9,7 +9,7 @@
 // with prompt-stream/engine; hydration status with loadAndReplay.)
 
 import { isAgentSettledEvent } from "@shared/agent/pi-events";
-import { drainQueueAfterAgentEnd, piSessionIdFromEvent } from "@/features/agent/messages";
+import { piSessionIdFromEvent } from "@/features/agent/messages";
 import {
   listRuntimeSessions,
   loadRuntimeStatus,
@@ -44,8 +44,6 @@ const RESUME_RECONNECT_DELAY_MS = 1_000;
 const RUNTIME_POLL_INTERVAL_MS = 5_000;
 const RUNTIME_POLL_IDLE_GRACE_MS = 10_000;
 
-type ScheduleFrame = (callback: () => void) => { cancel: () => void };
-
 export type SessionRuntimeBinding = {
   /** Single state commit boundary — one patchSession dispatch per call. */
   commit: (sessionId: SessionId, patch: (session: Session) => Session) => void;
@@ -53,19 +51,6 @@ export type SessionRuntimeBinding = {
   getSession: (sessionId: SessionId) => Session | undefined;
   /** Read all current workspace sessions (the binding's live ref). */
   getSessions: () => readonly Session[];
-};
-
-export type SessionRuntimeControllerDeps = {
-  api?: Partial<{
-    listRuntimeSessions: typeof listRuntimeSessions;
-    loadRuntimeStatus: typeof loadRuntimeStatus;
-    subscribeRuntimeEvents: typeof subscribeRuntimeEvents;
-  }>;
-  scheduleFrame?: ScheduleFrame;
-  reconnectDelayMs?: number;
-  idleReconnectMs?: number;
-  pollIntervalMs?: number;
-  pollIdleGraceMs?: number;
 };
 
 export type SessionRuntimeController = {
@@ -142,15 +127,7 @@ function sameRuntimePatch(session: Session, patch: Partial<Session>, status: str
   );
 }
 
-export function createSessionRuntimeController(
-  deps: SessionRuntimeControllerDeps = {},
-): SessionRuntimeController {
-  const api = { listRuntimeSessions, loadRuntimeStatus, subscribeRuntimeEvents, ...deps.api };
-  const reconnectDelayMs = deps.reconnectDelayMs ?? RESUME_RECONNECT_DELAY_MS;
-  const idleReconnectMs = deps.idleReconnectMs ?? RESUME_IDLE_RECONNECT_MS;
-  const pollIntervalMs = deps.pollIntervalMs ?? RUNTIME_POLL_INTERVAL_MS;
-  const pollIdleGraceMs = deps.pollIdleGraceMs ?? RUNTIME_POLL_IDLE_GRACE_MS;
-
+export function createSessionRuntimeController(): SessionRuntimeController {
   let binding: SessionRuntimeBinding | null = null;
   const cursors = new Map<SessionId, RuntimeCursor>();
   const streamContext: SessionStreamContext = { liveAssistantIds: new Map() };
@@ -227,7 +204,6 @@ export function createSessionRuntimeController(
   // imperative facade is unchanged so the controller's contract holds.
   const coalescer = createEffectTextDeltaCoalescer({
     applyPiEvent: applyEvent,
-    scheduleFrame: deps.scheduleFrame,
   });
 
   const enqueueEvent = (
@@ -244,6 +220,16 @@ export function createSessionRuntimeController(
   // Receive gate: advance receivedSeq immediately (dedup + reconnect cursor);
   // committedSeq — and the persisted lastEventSeq — only advance when the
   // event's effects are actually committed (see applyEvent).
+  // A turn can settle four ways: the authoritative `agent_settled` event, an
+  // idle status frame, the liveness reconcile, and the runtime-list poll. The
+  // live-target pin must drop on ALL of them — a pin that outlives its turn
+  // retargets the NEXT turn's blocks onto a settled bubble (or onto a dead id,
+  // where they are discarded silently while the seq cursor advances). That is
+  // what erased everything after a follow-up message when the stream dropped.
+  const dropLiveTarget = (sessionId: SessionId) => {
+    streamContext.liveAssistantIds.delete(sessionId);
+  };
+
   const acceptSeq = (sessionId: SessionId, seq?: number): boolean => {
     const current = cursors.get(sessionId) ?? adoptExternalCursor(undefined);
     const decision = acceptRuntimeSeq(current, seq);
@@ -264,6 +250,7 @@ export function createSessionRuntimeController(
     payload: Extract<RuntimeEventPayload, { type: "status" }>,
   ) => {
     const idle = payload.phase === "done" || payload.phase === "idle";
+    if (idle) dropLiveTarget(sessionId);
     commit(sessionId, (session) => ({
       ...session,
       piSessionId: payload.session?.piSessionId || session.piSessionId,
@@ -297,15 +284,11 @@ export function createSessionRuntimeController(
       // turn; left set, it would silently retarget the NEXT turn's events onto
       // this (now settled) bubble, so the next bubble renders empty — tool
       // calls and reasoning land off-screen and no final content appears.
-      streamContext.liveAssistantIds.delete(sessionId);
-      // Queue display reconciliation only: Pi drains its own follow_up queue
-      // server-side, so locally we just drop the drained head and any
-      // already-sent items from the visible queue.
-      commit(sessionId, (session) =>
-        (session.queue ?? []).length === 0
-          ? session
-          : { ...session, queue: drainQueueAfterAgentEnd(session.queue ?? []).remaining },
-      );
+      dropLiveTarget(sessionId);
+      // The queue is NOT touched here. Pi owns it: it drains its own follow_up
+      // queue server-side and tells us what happened through the delivered user
+      // echo and `queue_update`. Dropping items at settle just erased the stack
+      // a beat before pi delivered them.
       return;
     }
 
@@ -332,7 +315,8 @@ export function createSessionRuntimeController(
   // the finish (genuine restart) and ends the grace early.
   const withinFinishGrace = (sessionId: SessionId, fetchStartedAt: number): boolean => {
     const finishedAt = turnFinishedAt.get(sessionId);
-    if (finishedAt === undefined || fetchStartedAt - finishedAt >= pollIdleGraceMs) return false;
+    if (finishedAt === undefined || fetchStartedAt - finishedAt >= RUNTIME_POLL_IDLE_GRACE_MS)
+      return false;
     const acceptedAt = turnAcceptedAt.get(sessionId);
     return acceptedAt === undefined || acceptedAt <= finishedAt;
   };
@@ -468,8 +452,10 @@ export function createSessionRuntimeController(
   // the active branch is the recovery path and must always apply.
   const idleFromRuntimeList = (session: Session, status: RuntimeStatus, fetchStartedAt: number) => {
     const acceptedAt = turnAcceptedAt.get(session.id);
-    if (acceptedAt !== undefined && fetchStartedAt - acceptedAt < pollIdleGraceMs) return;
+    if (acceptedAt !== undefined && fetchStartedAt - acceptedAt < RUNTIME_POLL_IDLE_GRACE_MS)
+      return;
     const patch = patchRuntimeStatus(status);
+    dropLiveTarget(session.id);
     commit(session.id, (current) => {
       if (current.status !== "running" && current.status !== "stopping") return current;
       if (sameRuntimePatch(current, patch, "idle") && !current.activeAssistantId) {
@@ -495,7 +481,7 @@ export function createSessionRuntimeController(
         const epoch = pollEpoch;
         const fetchStartedAt = Date.now();
         const entries = yield* Effect.tryPromise({
-          try: () => api.listRuntimeSessions(),
+          try: () => listRuntimeSessions(),
           catch: (error) => error,
         });
         if (epoch !== pollEpoch || !binding) return;
@@ -528,20 +514,19 @@ export function createSessionRuntimeController(
       if (closed || reconnecting) return;
       reconnecting = true;
       sub?.close();
-      // Capped fixed-delay reconnect on a real timer so it is interruptible on
-      // close and deterministically drivable under test clocks.
+      // Capped fixed-delay reconnect on a real timer so close can interrupt it.
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         reconnecting = false;
         if (!closed) connect();
-      }, reconnectDelayMs);
+      }, RESUME_RECONNECT_DELAY_MS);
     };
 
     const reconcileLiveness = () => {
       void Effect.runPromise(
         Effect.gen(function* () {
           const status = yield* Effect.tryPromise({
-            try: () => api.loadRuntimeStatus(runtime, piSessionId),
+            try: () => loadRuntimeStatus(runtime, piSessionId),
             catch: () => null,
           });
           if (closed) return;
@@ -565,6 +550,7 @@ export function createSessionRuntimeController(
           cancelReconnect();
           sub?.close();
           coalescer.flushNow(sessionId);
+          dropLiveTarget(sessionId);
           commit(sessionId, (session) =>
             session.status === "running" ||
             session.status === "starting" ||
@@ -583,7 +569,7 @@ export function createSessionRuntimeController(
       // (Re)connect from the highest RECEIVED seq — an unflushed coalesced
       // delta is still in memory, so replaying it would double-apply.
       const after = reconnectAfter(cursors.get(sessionId) ?? adoptExternalCursor(undefined));
-      sub = api.subscribeRuntimeEvents(runtime, after, piSessionId, {
+      sub = subscribeRuntimeEvents(runtime, after, piSessionId, {
         onPayload: (payload) => {
           if (closed) return;
           lastPayloadAt = Date.now();
@@ -600,12 +586,12 @@ export function createSessionRuntimeController(
     connect();
 
     const watchdogFiber =
-      idleReconnectMs > 0
+      RESUME_IDLE_RECONNECT_MS > 0
         ? (Effect.runFork(
             Effect.sync(() => {
-              if (closed || Date.now() - lastPayloadAt < idleReconnectMs) return;
+              if (closed || Date.now() - lastPayloadAt < RESUME_IDLE_RECONNECT_MS) return;
               void reconcileLiveness();
-            }).pipe(Effect.repeat(Schedule.spaced(idleReconnectMs))),
+            }).pipe(Effect.repeat(Schedule.spaced(RESUME_IDLE_RECONNECT_MS))),
           ) as never)
         : null;
 
@@ -706,13 +692,11 @@ export function createSessionRuntimeController(
     flush: (sessionId) => coalescer.flushNow(sessionId),
     pollNow: () => {
       stopPoll();
-      if (!binding || binding.getSessions().length === 0) return;
-      // One immediate reconcile, then a steady interval. setInterval (unlike
-      // Effect.repeat) does not fire an extra immediate iteration, so pollNow
-      // produces exactly one fetch up front, and the timer is drivable under a
-      // test clock.
+      if (!binding) return;
+      // One immediate reconcile, then a steady interval. setInterval does not
+      // fire an extra immediate iteration, so pollNow produces one fetch up front.
       void pollOnce();
-      pollTimer = setInterval(() => void pollOnce(), pollIntervalMs);
+      pollTimer = setInterval(() => void pollOnce(), RUNTIME_POLL_INTERVAL_MS);
     },
     closeAll: () => {
       stopPoll();

@@ -12,11 +12,14 @@ export interface DashboardLayoutProps {
   currentProcess: ProcessInfo | null;
   currentRecipe: RecipeWithStatus | null;
   metrics: Metrics | null;
+  /** Metrics were received but do not match the running process. */
+  metricsDetached?: boolean;
   gpus: GPU[];
   recipes: RecipeWithStatus[];
   logs: string[];
   launching: boolean;
   lifecycleStatus: "idle" | "starting" | "ready" | "error";
+  lifecycleError: string | null;
   benchmarking: boolean;
   benchmarkResult: number | null;
   launchProgress: LaunchProgress | null;
